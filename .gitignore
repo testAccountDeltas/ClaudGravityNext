@@ -1,0 +1,43 @@
+# ===== Секреты и реальные учётные данные — НИКОГДА не коммитить =====
+config.json
+auths/*.json
+auths/**/*.json
+certs/
+# cmd/gateway's own MITM CA (private key lives here) — see mitmlisteners.go.
+ca/
+# launch_v2.cmd/launch_v2_server.cmd's isolated CLAUDE_CONFIG_DIR for test
+# sessions against this gateway — real Claude Code session/plugin/profile
+# data accumulates here during local testing, not migration code; found as
+# an undocumented ~19MB directory by a full-session audit, never meant to
+# be tracked.
+profile/
+profile-server/
+
+# ===== Собранные бинарники =====
+gateway
+gateway.exe
+gateway.exe.bak
+gateway_linux*
+gateway_v2*
+*.exe
+
+# ===== Runtime-данные / логи / БД — генерируются при работе шлюза =====
+*.log
+*.log.*
+*.db
+*.db-shm
+*.db-wal
+
+# Redacted structural capture of live traffic (перенос формата из v1's
+# speccapture.go) — остаётся локальным по той же причине, что в v1.
+request_captures/
+
+# Корпус для replay-тестов StreamFSM (Часть 7.5 спецификации) и
+# характеризационные golden-снимки v1 — real-traffic-derived, не для репо.
+testdata/raw_chunks/
+
+# ===== Публикуемая документация — ТОЛЬКО README.md и LICENSE =====
+# Тот же явный allowlist через negation, что в superrelay/.gitignore —
+# чтобы новый внутренний *.md файл не проскочил по умолчанию.
+*.md
+!README.md
