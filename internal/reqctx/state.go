@@ -41,6 +41,13 @@ type State struct {
 
 	GeminiBody []byte
 
+	// OutputAllowanceBumped marks the attempt that already runs with the
+	// widened maxOutputTokens of the one empty-MAX_TOKENS retry, so a second
+	// such turn is reported as max_tokens instead of retried again.
+	OutputAllowanceBumped bool
+
 	EstInputTokens  int
 	CachePrefixFrac float64
+	// CacheFrac1h is the same proxy up to the last ttl=1h breakpoint.
+	CacheFrac1h float64
 }

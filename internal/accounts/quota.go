@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -170,55 +169,9 @@ hostLoop:
 		})
 	}
 
-	// Only a Gemini-bucket exhaustion cools the whole account down: Gemini
-	// powers ~99% of requests and is what CooldownUntil gates in selector.go
-	// (account-wide, not per-model). A 3P (Claude/GPT) bucket can legitimately
-	// sit at 0% for days on a free-tier account while Gemini itself is still
-	// at 100% — letting that 3P exhaustion set CooldownUntil locked such
-	// accounts out of Gemini for up to the 3P bucket's own reset window
-	// (matches pickFiveHourAndWeekly's same "claude" vs "gemini" group split).
-	// GAP-15: Split 5h vs 7d cooldown windows so an account that exhausted its
-	// 5-hour rolling quota is cooled down until that 5h window resets (e.g. 15-60 min),
-	// rather than being locked out for 6-7 days due to a near-limit weekly bucket.
-	var cooldown5h time.Time
-	var cooldown7d time.Time
-	now := time.Now()
-	for _, g := range groups {
-		if strings.Contains(strings.ToLower(g.DisplayName), "claude") {
-			continue
-		}
-		for _, b := range g.Buckets {
-			if b.RemainingFraction <= exhaustedFraction {
-				var resetAt time.Time
-				if b.ResetTime != "" {
-					if t, err := time.Parse(time.RFC3339Nano, b.ResetTime); err == nil {
-						resetAt = t
-					} else if t, err := time.Parse(time.RFC3339, b.ResetTime); err == nil {
-						resetAt = t
-					}
-				}
-				if resetAt.IsZero() || !resetAt.After(now) {
-					resetAt = now.Add(15 * time.Minute)
-				}
-				if resetAt.Before(now.Add(6 * time.Hour)) {
-					if cooldown5h.IsZero() || resetAt.After(cooldown5h) {
-						cooldown5h = resetAt
-					}
-				} else {
-					if cooldown7d.IsZero() || resetAt.After(cooldown7d) {
-						cooldown7d = resetAt
-					}
-				}
-			}
-		}
-	}
-
-	effectiveCooldown := cooldown5h
-	if !cooldown7d.IsZero() {
-		if effectiveCooldown.IsZero() || cooldown7d.After(effectiveCooldown) {
-			effectiveCooldown = cooldown7d
-		}
-	}
+	// Quota-derived account-wide cooldown: see quotaBlockUntil (any exhausted
+	// non-Claude bucket blocks the account until that bucket resets).
+	effectiveCooldown := quotaBlockUntil(groups, time.Now())
 
 	am.mu.Lock()
 	acc.Quotas = groups
@@ -229,11 +182,10 @@ hostLoop:
 	if stickyErrorKinds[acc.ErrorKind] && acc.ErrorUntil.After(effectiveCooldown) {
 		effectiveCooldown = acc.ErrorUntil
 	}
-	if !effectiveCooldown.IsZero() {
-		acc.CooldownUntil = effectiveCooldown
-	} else {
-		acc.CooldownUntil = time.Time{}
+	if time.Now().Before(acc.hardCooldownUntil) && acc.hardCooldownUntil.After(effectiveCooldown) {
+		effectiveCooldown = acc.hardCooldownUntil // a 429/503/refresh-failure cooldown outlives a green poll
 	}
+	acc.CooldownUntil = effectiveCooldown
 	acc.LastError = ""
 	am.mu.Unlock()
 

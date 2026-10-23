@@ -22,7 +22,7 @@ const minPDFTokenFloor = 2500
 
 // geminiPDFTokensPerPage is Gemini's real documented flat per-page PDF
 // billing, independent of how text-dense or image-dense that page is.
-const geminiPDFTokensPerPage = 258
+const geminiPDFTokensPerPage = 258 // Gemini 2.x; see profile.go for 3.x
 
 // pdfPageCountPattern looks for an uncompressed PDF page-tree's /Count key
 // directly in the raw decoded bytes — a best-effort heuristic, not a real
@@ -83,6 +83,12 @@ func extractBalancedPDFPagesCounts(raw []byte) []int {
 // count is found, letting the caller fall back to its own density-based
 // estimate.
 func estimatePDFTokensFromPageCount(b64Data string) (int, bool) {
+	return estimatePDFTokensP(b64Data, Gemini2Profile)
+}
+
+// estimatePDFTokensP is estimatePDFTokensFromPageCount under an explicit
+// model-family Profile.
+func estimatePDFTokensP(b64Data string, prof Profile) (int, bool) {
 	raw, err := base64.StdEncoding.DecodeString(b64util.NormalizeBase64(b64Data))
 	if err != nil || len(raw) == 0 {
 		return 0, false
@@ -124,7 +130,7 @@ func estimatePDFTokensFromPageCount(b64Data string) (int, bool) {
 	if maxPages == 0 {
 		return 0, false
 	}
-	return maxPages * geminiPDFTokensPerPage, true
+	return maxPages * prof.PDFTokensPerPage, true
 }
 
 // extractPagesFromDecompressedStreams scans raw bytes for Flate-compressed

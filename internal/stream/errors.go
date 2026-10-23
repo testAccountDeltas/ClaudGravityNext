@@ -7,6 +7,7 @@ package stream
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -63,6 +64,27 @@ func (f *FSM) handleInBandError(errNode gjson.Result) error {
 	// FinishWithError's own close-on-finish path if it ran afterward for
 	// the same stream, since FinishWithError no-ops once hasFinished is
 	// already true.
+	if !f.writer.IsReleased() {
+		// Nothing of this turn has reached the client yet (events are still
+		// held): surface the failure as a typed error so the orchestrator
+		// can retry it on another account instead of committing a 200
+		// stream that ends in an error frame.
+		f.mu.Lock()
+		f.hasFinished = true
+		f.mu.Unlock()
+		status := int(errNode.Get("code").Int())
+		if status < 400 || status > 599 {
+			status = statusForErrType(errType)
+			switch errType {
+			case "rate_limit_error":
+				status = 429
+			case "invalid_request_error":
+				status = 400
+			}
+		}
+		return &UpstreamTurnError{ErrType: errType, Status: status, InBand: true,
+			Msg: "upstream stream error: " + msg}
+	}
 	_ = f.closeCurrentBlock()
 	// GAP-D1-10: msg comes from upstream and can contain arbitrary bytes
 	// — %q escapes non-ASCII/control chars as \xHH, not valid JSON per
@@ -109,4 +131,41 @@ func (f *FSM) FinishWithError(err error) {
 	_ = f.writer.EmitEvent("error", errPayload)
 	// GAP-D1-09: Finish() ensures no background pings are sent after error.
 	f.writer.Finish()
+}
+
+// failTurn ends a turn that must not be reported as a success. Called with
+// hasFinished already set. If the client has already received events (a
+// block was committed), the only honest option is an SSE error event; if
+// everything is still held, nothing is written and the caller retries.
+func (f *FSM) failTurn(terr *UpstreamTurnError) error {
+	if f.writer.IsReleased() {
+		_ = f.closeCurrentBlock()
+		f.flushPendingThinkingSignatureFallback()
+		msgBytes, _ := json.Marshal("Upstream turn failed: " + terr.Error())
+		errPayload := fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%s}}`, terr.ErrType, msgBytes)
+		_ = f.writer.EmitEvent("error", errPayload)
+		f.writer.Finish()
+	}
+	return terr
+}
+
+// FailTruncated reports a stream that ended without any finishReason.
+func (f *FSM) FailTruncated() error {
+	f.mu.Lock()
+	if f.hasFinished {
+		f.mu.Unlock()
+		return nil
+	}
+	f.hasFinished = true
+	f.mu.Unlock()
+	return f.failTurn(TruncatedTurnError())
+}
+
+// WriteSSEError writes one terminal SSE error event straight to a response
+// whose headers are already committed (used by the orchestrator when every
+// retry failed after an earlier attempt had to commit keepalive pings).
+func WriteSSEError(w http.ResponseWriter, flusher http.Flusher, errType, message string) {
+	msgBytes, _ := json.Marshal(message)
+	payload := fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%s}}`, errType, msgBytes)
+	_ = writeAndFlush(w, flusher, formatSSEEvent("error", payload))
 }

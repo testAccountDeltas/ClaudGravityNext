@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/tidwall/gjson"
+
+	"claudgravity/internal/cacheusage"
 )
 
 // validateMessagesRequest checks the hard-400 cases Anthropic's own spec
@@ -32,8 +34,14 @@ func validateMessagesRequest(bodyBytes []byte) (errMsg string, ok bool) {
 	if gjson.GetBytes(bodyBytes, "model").String() == "" {
 		return "\"model\": required field is missing", false
 	}
-	if mt := gjson.GetBytes(bodyBytes, "max_tokens"); !mt.Exists() || mt.Type != gjson.Number || mt.Int() < 0 || float64(mt.Int()) != mt.Num {
-		return "\"max_tokens\": required field must be a non-negative integer", false
+	if mt := gjson.GetBytes(bodyBytes, "max_tokens"); !mt.Exists() || mt.Type != gjson.Number || mt.Int() < 1 || float64(mt.Int()) != mt.Num {
+		return "\"max_tokens\": required field must be an integer >= 1", false
+	}
+	if n := cacheusage.Analyze(bodyBytes).Count; n > cacheusage.MaxBreakpoints {
+		return fmt.Sprintf("A maximum of %d blocks with cache_control may be provided. Found %d.", cacheusage.MaxBreakpoints, n), false
+	}
+	if msg, ok := validateRequestShape(bodyBytes); !ok {
+		return msg, false
 	}
 	if tc := gjson.GetBytes(bodyBytes, "tool_choice"); tc.Exists() {
 		toolsArr := gjson.GetBytes(bodyBytes, "tools")
@@ -50,7 +58,7 @@ func validateMessagesRequest(bodyBytes []byte) (errMsg string, ok bool) {
 			choiceType = tc.String()
 		}
 		switch choiceType {
-		case "auto", "any", "required", "tool", "none":
+		case "auto", "any", "tool", "none":
 		default:
 			return fmt.Sprintf("\"tool_choice.type\": %q is not one of auto, any, tool, none", choiceType), false
 		}

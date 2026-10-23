@@ -53,7 +53,6 @@ func StreamGeminiToClaude(f *FSM, r io.Reader, onActivity func()) error {
 				if strings.HasPrefix(line, "data:") {
 					payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 					if payload == "[DONE]" {
-						f.appendGroundingSourcesFooter()
 						fr := "STOP"
 						if f.pendingFinishReason != "" {
 							fr = f.pendingFinishReason
@@ -92,10 +91,12 @@ func StreamGeminiToClaude(f *FSM, r io.Reader, onActivity func()) error {
 		}
 	}
 
-	fr := "STOP"
-	if f.pendingFinishReason != "" {
-		fr = f.pendingFinishReason
-		f.pendingFinishReason = ""
+	// EOF with no finishReason ever seen is a truncated stream (dropped
+	// connection, upstream cut), never a clean end_turn.
+	if f.pendingFinishReason == "" {
+		return f.FailTruncated()
 	}
+	fr := f.pendingFinishReason
+	f.pendingFinishReason = ""
 	return f.FinishStream(fr)
 }

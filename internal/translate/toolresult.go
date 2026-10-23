@@ -45,8 +45,10 @@ func convertToolResultBlock(p gjson.Result, role string, toolIDToName map[string
 					sb.WriteString(item.Get("text").String())
 				} else if item.Type == gjson.String {
 					sb.WriteString(item.String())
-				} else {
+				} else if t := item.Get("type").String(); t == "image" || t == "document" {
 					sb.WriteString("[binary attachment]")
+				} else if txt := blockToText(item); txt != "" {
+					sb.WriteString("\n" + txt + "\n")
 				}
 				return true
 			})
@@ -87,6 +89,13 @@ func convertToolResultBlock(p gjson.Result, role string, toolIDToName map[string
 				// GAP-CGN-D2-06 (GAP-D3-14): untyped JSON objects in tool_result array
 				if item.IsObject() && item.Get("type").String() == "" {
 					sb.WriteString(item.Raw)
+				} else if txt := blockToText(item); txt != "" {
+					// tool_reference, search_result, ... nested in a
+					// tool_result: labelled text, never an empty result.
+					if sb.Len() > 0 {
+						sb.WriteString("\n")
+					}
+					sb.WriteString(txt)
 				}
 			}
 			return true

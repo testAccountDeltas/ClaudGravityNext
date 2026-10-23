@@ -14,7 +14,7 @@ profile/
 profile-server/
 
 # ===== Собранные бинарники =====
-gateway
+/gateway
 gateway.exe
 gateway.exe.bak
 gateway_linux*
@@ -41,3 +41,6 @@ testdata/raw_chunks/
 # чтобы новый внутренний *.md файл не проскочил по умолчанию.
 *.md
 !README.md
+
+# Agent worktrees / local Claude Code state
+.claude/

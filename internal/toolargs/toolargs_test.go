@@ -75,86 +75,6 @@ func TestNormalizeToArgsObject_BareStringMapsToPrimaryParam(t *testing.T) {
 	}
 }
 
-func TestNormalizeToArgsObject_NumericStringCoercion(t *testing.T) {
-	readArgs := `{"file_path":"foo.go","offset":"15","limit":"50"}`
-	out := NormalizeToArgsObject("Read", readArgs)
-	var v map[string]interface{}
-	if err := json.Unmarshal([]byte(out), &v); err != nil {
-		t.Fatalf("parse error: %v", err)
-	}
-	// json.Unmarshal into map[string]interface{} unmarshals numbers as float64
-	if v["offset"] != float64(15) || v["limit"] != float64(50) {
-		t.Fatalf("expected numbers coerced from string, got %v", v)
-	}
-
-	bashArgs := `{"command":"sleep 1","timeout":"30"}`
-	outBash := NormalizeToArgsObject("Bash", bashArgs)
-	var bv map[string]interface{}
-	if err := json.Unmarshal([]byte(outBash), &bv); err != nil {
-		t.Fatalf("parse error: %v", err)
-	}
-	if bv["timeout"] != float64(30) {
-		t.Fatalf("expected timeout coerced from string, got %v", bv)
-	}
-
-	mcpArgs := `{"file_path":"test.ts","insert_line":"42","score":"9.5","id":"0123"}`
-	outMcp := NormalizeToArgsObject("mcp_custom_tool", mcpArgs)
-	var mv map[string]interface{}
-	if err := json.Unmarshal([]byte(outMcp), &mv); err != nil {
-		t.Fatalf("parse error: %v", err)
-	}
-	if mv["insert_line"] != float64(42) {
-		t.Fatalf("expected insert_line coerced to 42, got %v", mv["insert_line"])
-	}
-	if mv["score"] != 9.5 {
-		t.Fatalf("expected score coerced to 9.5, got %v", mv["score"])
-	}
-	if mv["file_path"] != "test.ts" {
-		t.Fatalf("expected file_path preserved as string, got %v", mv["file_path"])
-	}
-	if mv["id"] != "0123" {
-		t.Fatalf("expected leading-zero id preserved as string, got %v", mv["id"])
-	}
-
-	taskArgs := `{"taskId":"1","status":"completed","agentId":"42"}`
-	outTask := NormalizeToArgsObject("TaskUpdate", taskArgs)
-	var tv map[string]interface{}
-	if err := json.Unmarshal([]byte(outTask), &tv); err != nil {
-		t.Fatalf("parse error: %v", err)
-	}
-	if tv["taskId"] != "1" {
-		t.Fatalf("expected taskId preserved as string '1', got %v", tv["taskId"])
-	}
-	if tv["agentId"] != "42" {
-		t.Fatalf("expected agentId preserved as string '42', got %v", tv["agentId"])
-	}
-}
-
-func TestNormalizeToArgsObject_PrunesNullValues(t *testing.T) {
-	raw := `{"file_path":"foo.go","offset":null,"limit":null,"nested":{"opt":null,"req":"ok"}}`
-	out := NormalizeToArgsObject("Read", raw)
-	var v map[string]interface{}
-	if err := json.Unmarshal([]byte(out), &v); err != nil {
-		t.Fatalf("parse error: %v", err)
-	}
-	if _, exists := v["offset"]; exists {
-		t.Fatalf("expected offset pruned from args, got %v", v["offset"])
-	}
-	if _, exists := v["limit"]; exists {
-		t.Fatalf("expected limit pruned from args, got %v", v["limit"])
-	}
-	nested, ok := v["nested"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected nested map, got %v", v["nested"])
-	}
-	if _, exists := nested["opt"]; exists {
-		t.Fatalf("expected nested.opt pruned from args, got %v", nested["opt"])
-	}
-	if nested["req"] != "ok" {
-		t.Fatalf("expected nested.req preserved, got %v", nested["req"])
-	}
-}
-
 func TestNormalizeToArgsObject_LineContinuation_IsRepaired(t *testing.T) {
 	// Model emits backslash followed by literal newline (line continuation) inside a string literal
 	raw := "{\"command\":\"echo line1 \\\nline2\"}"
@@ -231,80 +151,6 @@ func TestNormalizeToArgsObject_DatedAndHyphenatedTools(t *testing.T) {
 	if err := json.Unmarshal([]byte(nbOut), &nv); err != nil || nv["notebook_path"] != "test.ipynb" {
 		t.Fatalf("expected notebook_edit mapped to 'notebook_path', got %s", nbOut)
 	}
-
-	// Dated read numeric coercion
-	readDated := NormalizeToArgsObject("read_20250124", `{"file_path":"foo.go","offset":"10","limit":"20"}`)
-	var rv map[string]interface{}
-	if err := json.Unmarshal([]byte(readDated), &rv); err != nil || rv["offset"] != float64(10) || rv["limit"] != float64(20) {
-		t.Fatalf("expected dated read numeric coercion, got %s", readDated)
-	}
-
-	// Dated bash timeout coercion
-	bashTimeout := NormalizeToArgsObject("bash_20250124", `{"command":"ls","timeout":"60"}`)
-	var btv map[string]interface{}
-	if err := json.Unmarshal([]byte(bashTimeout), &btv); err != nil || btv["timeout"] != float64(60) {
-		t.Fatalf("expected dated bash timeout coercion, got %s", bashTimeout)
-	}
-}
-
-func TestNormalizeToArgsObject_BooleanCoercion(t *testing.T) {
-	cases := []struct {
-		input    string
-		field    string
-		wantBool bool
-	}{
-		{`{"file_path":"a.go","old_string":"x","new_string":"y","replace_all":"true"}`, "replace_all", true},
-		{`{"file_path":"a.go","old_string":"x","new_string":"y","replace_all":"false"}`, "replace_all", false},
-		{`{"command":"ls","dangerouslyDisableSandbox":"1"}`, "dangerouslyDisableSandbox", true},
-		{`{"command":"ls","run_in_background":"0"}`, "run_in_background", false},
-		{`{"questions":[],"multiSelect":"true"}`, "multiSelect", true},
-	}
-	for _, tc := range cases {
-		out := NormalizeToArgsObject("tool", tc.input)
-		var m map[string]interface{}
-		if err := json.Unmarshal([]byte(out), &m); err != nil {
-			t.Fatalf("unmarshal error: %v, out: %s", err, out)
-		}
-		val, ok := m[tc.field]
-		if !ok {
-			t.Fatalf("missing field %s in %s", tc.field, out)
-		}
-		bVal, isBool := val.(bool)
-		if !isBool || bVal != tc.wantBool {
-			t.Fatalf("field %s: expected bool %v, got %T (%v)", tc.field, tc.wantBool, val, val)
-		}
-	}
-}
-
-func TestNormalizeToArgsObject_AskUserQuestionAndTaskCreateFields(t *testing.T) {
-	// Options with numeric string label "1" must stay string "1" for Zod
-	in := `{"questions":[{"question":"Which option?","header":"Choice","options":[{"label":"1","description":"First"},{"label":"2","description":"Second"}],"multiSelect":"false"}]}`
-	out := NormalizeToArgsObject("AskUserQuestion", in)
-	var m map[string]interface{}
-	if err := json.Unmarshal([]byte(out), &m); err != nil {
-		t.Fatalf("unmarshal error: %v, out: %s", err, out)
-	}
-	qs := m["questions"].([]interface{})
-	q0 := qs[0].(map[string]interface{})
-	opts := q0["options"].([]interface{})
-	opt0 := opts[0].(map[string]interface{})
-	if lbl, ok := opt0["label"].(string); !ok || lbl != "1" {
-		t.Fatalf("expected option label to remain string \"1\", got: %T (%v)", opt0["label"], opt0["label"])
-	}
-	if ms, ok := q0["multiSelect"].(bool); !ok || ms != false {
-		t.Fatalf("expected multiSelect coerced to boolean false, got: %T (%v)", q0["multiSelect"], q0["multiSelect"])
-	}
-
-	// TaskCreate subject with numeric string "100" must stay string "100"
-	inTask := `{"subject":"100","description":"Task 100"}`
-	outTask := NormalizeToArgsObject("TaskCreate", inTask)
-	var tm map[string]interface{}
-	if err := json.Unmarshal([]byte(outTask), &tm); err != nil {
-		t.Fatalf("unmarshal error: %v, out: %s", err, outTask)
-	}
-	if subj, ok := tm["subject"].(string); !ok || subj != "100" {
-		t.Fatalf("expected subject to remain string \"100\", got: %T (%v)", tm["subject"], tm["subject"])
-	}
 }
 
 func TestNormalizeToArgsObject_TrailingCommasAndSingleQuotesAndWindowsPaths(t *testing.T) {
@@ -350,58 +196,56 @@ func TestNormalizeToArgsObject_TrailingCommasAndSingleQuotesAndWindowsPaths(t *t
 	}
 }
 
-		func TestNormalizeToArgsObject_AdversarialSurrogatePairsAndEmojis(t *testing.T) {
-		// Raw emoji in string
-		rawEmoji := `{"command":"echo 🚀🎉"}`
-		outEmoji := NormalizeToArgsObject("Bash", rawEmoji)
-		if outEmoji != rawEmoji {
+func TestNormalizeToArgsObject_AdversarialSurrogatePairsAndEmojis(t *testing.T) {
+	// Raw emoji in string
+	rawEmoji := `{"command":"echo 🚀🎉"}`
+	outEmoji := NormalizeToArgsObject("Bash", rawEmoji)
+	if outEmoji != rawEmoji {
 		t.Fatalf("expected raw emoji preserved, got %s", outEmoji)
-		}
+	}
 
-		// Escaped surrogate pairs 😀 (grinning face)
-		rawSurrogate := "{\"command\":\"echo \\uD83D\\uDE00\"}"
-		outSurrogate := NormalizeToArgsObject("Bash", rawSurrogate)
-		var v map[string]interface{}
-		if err := json.Unmarshal([]byte(outSurrogate), &v); err != nil {
+	// Escaped surrogate pairs 😀 (grinning face)
+	rawSurrogate := "{\"command\":\"echo \\uD83D\\uDE00\"}"
+	outSurrogate := NormalizeToArgsObject("Bash", rawSurrogate)
+	var v map[string]interface{}
+	if err := json.Unmarshal([]byte(outSurrogate), &v); err != nil {
 		t.Fatalf("failed to parse surrogate pair: %v", err)
-		}
-		if v["command"] != "echo \U0001F600" && v["command"] != "echo 😀" {
+	}
+	if v["command"] != "echo \U0001F600" && v["command"] != "echo 😀" {
 		t.Fatalf("expected surrogate decoded to grinning face, got %v", v["command"])
-		}
+	}
 
-		// Lone surrogate \uD83D (malformed)
-		rawLoneSurrogate := "{\"command\":\"echo \\uD83D test\"}"
-		outLone := NormalizeToArgsObject("Bash", rawLoneSurrogate)
-		if err := json.Unmarshal([]byte(outLone), &v); err != nil {
+	// Lone surrogate \uD83D (malformed)
+	rawLoneSurrogate := "{\"command\":\"echo \\uD83D test\"}"
+	outLone := NormalizeToArgsObject("Bash", rawLoneSurrogate)
+	if err := json.Unmarshal([]byte(outLone), &v); err != nil {
 		t.Fatalf("lone surrogate crashed parser: %v", err)
-		}
-		}
+	}
+}
 
-		func TestNormalizeToArgsObject_AdversarialSlackAndGitHubMCP(t *testing.T) {
-		// Slack message ts: "1503435956.000247"
-		slackArgs := `{"channel":"C123456","ts":"1503435956.000247","thread_ts":"1503435956.000247"}`
-		outSlack := NormalizeToArgsObject("slack_post_message", slackArgs)
-		var sv map[string]interface{}
-		if err := json.Unmarshal([]byte(outSlack), &sv); err != nil {
+func TestNormalizeToArgsObject_AdversarialSlackAndGitHubMCP(t *testing.T) {
+	// Slack message ts: "1503435956.000247"
+	slackArgs := `{"channel":"C123456","ts":"1503435956.000247","thread_ts":"1503435956.000247"}`
+	outSlack := NormalizeToArgsObject("slack_post_message", slackArgs)
+	var sv map[string]interface{}
+	if err := json.Unmarshal([]byte(outSlack), &sv); err != nil {
 		t.Fatalf("parse error: %v", err)
-		}
-		t.Logf("Slack ts output type: %T value: %v", sv["ts"], sv["ts"])
-		t.Logf("Slack thread_ts output type: %T value: %v", sv["thread_ts"], sv["thread_ts"])
+	}
+	t.Logf("Slack ts output type: %T value: %v", sv["ts"], sv["ts"])
+	t.Logf("Slack thread_ts output type: %T value: %v", sv["thread_ts"], sv["thread_ts"])
 
-		// GitHub repo named "2048"
-		ghArgs := `{"owner":"facebook","repo":"2048","base":"1.0","head":"2.0"}`
-		outGH := NormalizeToArgsObject("github_create_pull_request", ghArgs)
-		var gv map[string]interface{}
-		if err := json.Unmarshal([]byte(outGH), &gv); err != nil {
+	// GitHub repo named "2048"
+	ghArgs := `{"owner":"facebook","repo":"2048","base":"1.0","head":"2.0"}`
+	outGH := NormalizeToArgsObject("github_create_pull_request", ghArgs)
+	var gv map[string]interface{}
+	if err := json.Unmarshal([]byte(outGH), &gv); err != nil {
 		t.Fatalf("parse error: %v", err)
-		}
-		t.Logf("GitHub repo output type: %T value: %v", gv["repo"], gv["repo"])
-		t.Logf("GitHub base output type: %T value: %v", gv["base"], gv["base"])
+	}
+	t.Logf("GitHub repo output type: %T value: %v", gv["repo"], gv["repo"])
+	t.Logf("GitHub base output type: %T value: %v", gv["base"], gv["base"])
 
-		// Nested args string inside object
-		nestedArgs := `{"args":"{\"command\":\"ls -la\"}"}`
-		outNested := NormalizeToArgsObject("Bash", nestedArgs)
-		t.Logf("Nested args output: %s", outNested)
-		}
-
-
+	// Nested args string inside object
+	nestedArgs := `{"args":"{\"command\":\"ls -la\"}"}`
+	outNested := NormalizeToArgsObject("Bash", nestedArgs)
+	t.Logf("Nested args output: %s", outNested)
+}

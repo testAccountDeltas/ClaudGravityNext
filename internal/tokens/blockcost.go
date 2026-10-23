@@ -50,7 +50,17 @@ import (
 // respectively. textCost selects which leaf formula a caller wants:
 // WeightedCharTokens for the realistic estimate, FlatTextTokens for the
 // pessimistic truncation-safety one.
+// blockCost, imageCost, documentCost, estimateImageTokens and
+// estimatePDFTokensFromPageCount price with the legacy Gemini 2.x profile
+// (pinned by the characterization tests); production paths use the *P
+// variants with an explicit Profile.
 func blockCost(b claude.Block, isLastAssistant bool, textCost func(string) int) int {
+	return blockCostP(b, isLastAssistant, textCost, Gemini2Profile)
+}
+
+// blockCostP is blockCost under an explicit model-family Profile (image
+// and PDF page prices differ between Gemini 2.x and 3.x).
+func blockCostP(b claude.Block, isLastAssistant bool, textCost func(string) int, prof Profile) int {
 	switch b.Type {
 	case "text":
 		t, _ := b.AsText()
@@ -79,7 +89,7 @@ func blockCost(b claude.Block, isLastAssistant bool, textCost func(string) int) 
 
 	case "tool_result":
 		tr, _ := b.AsToolResult()
-		return toolResultCost(tr.Content, isLastAssistant, textCost)
+		return toolResultCostP(tr.Content, isLastAssistant, textCost, prof)
 
 	case "web_search_tool_result":
 		ws, _ := b.AsWebSearchToolResult()
@@ -91,11 +101,11 @@ func blockCost(b claude.Block, isLastAssistant bool, textCost func(string) int) 
 
 	case "image":
 		img, _ := b.AsImage()
-		return imageCost(img.Source, textCost)
+		return imageCostP(img.Source, textCost, prof)
 
 	case "document":
 		doc, _ := b.AsDocument()
-		cost := documentCost(doc.Source, textCost)
+		cost := documentCostP(doc.Source, textCost, prof)
 		if doc.Title != "" {
 			cost += textCost(doc.Title)
 		}
@@ -114,6 +124,10 @@ func blockCost(b claude.Block, isLastAssistant bool, textCost func(string) int) 
 // toolResultCost prices a tool_result's dynamic Content: a bare string, or
 // an array mixing text/image/document blocks and/or bare strings.
 func toolResultCost(content json.RawMessage, isLastAssistant bool, textCost func(string) int) int {
+	return toolResultCostP(content, isLastAssistant, textCost, Gemini2Profile)
+}
+
+func toolResultCostP(content json.RawMessage, isLastAssistant bool, textCost func(string) int, prof Profile) int {
 	var s string
 	if err := json.Unmarshal(content, &s); err == nil {
 		return textCost(s)
@@ -122,7 +136,7 @@ func toolResultCost(content json.RawMessage, isLastAssistant bool, textCost func
 	if err := json.Unmarshal(content, &items); err == nil && len(items) > 0 {
 		total := 0
 		for _, item := range items {
-			total += blockCost(item, isLastAssistant, textCost)
+			total += blockCostP(item, isLastAssistant, textCost, prof)
 		}
 		return total
 	}
@@ -154,6 +168,10 @@ func toolResultCost(content json.RawMessage, isLastAssistant bool, textCost func
 // estimateImageTokens/the svg decoded-byte-ratio below, which use the same
 // fixed formula in both.
 func imageCost(src claude.ImageSource, textCost func(string) int) int {
+	return imageCostP(src, textCost, Gemini2Profile)
+}
+
+func imageCostP(src claude.ImageSource, textCost func(string) int, prof Profile) int {
 	if src.Type == "url" {
 		if src.URL != "" {
 			return textCost("[Attached by URL: " + src.URL + "]")
@@ -171,7 +189,7 @@ func imageCost(src claude.ImageSource, textCost func(string) int) int {
 		}
 		return 1
 	}
-	return estimateImageTokens(src.Data)
+	return estimateImageTokensP(src.Data, prof)
 }
 
 // documentCost prices a document source (base64 PDF/image/text, a
@@ -182,6 +200,10 @@ func imageCost(src claude.ImageSource, textCost func(string) int) int {
 // formula in both of v1's estimators, independent of which textCost a
 // caller passes.
 func documentCost(src claude.DocumentSource, textCost func(string) int) int {
+	return documentCostP(src, textCost, Gemini2Profile)
+}
+
+func documentCostP(src claude.DocumentSource, textCost func(string) int, prof Profile) int {
 	switch src.Type {
 	case "content":
 		return textCost(documentContentText(src.Content))
@@ -201,14 +223,14 @@ func documentCost(src claude.DocumentSource, textCost func(string) int) int {
 		case mediaType == "application/pdf" || mediaType == "":
 			// PDF token density (~1 token per 500 base64 chars) — a flat
 			// len/2 would price a 2MB scanned PDF at ~1.33M tokens.
-			if pageEst, ok := estimatePDFTokensFromPageCount(src.Data); ok {
+			if pageEst, ok := estimatePDFTokensP(src.Data, prof); ok {
 				pageCountTrusted = true
 				est = pageEst
 			} else {
 				est = len(src.Data) / 500
 			}
 		case strings.HasPrefix(mediaType, "image/") && !isSVGMediaType(mediaType):
-			est = estimateImageTokens(src.Data)
+			est = estimateImageTokensP(src.Data, prof)
 		default:
 			// Base64-encoded text document (code, logs, CSV) or SVG — decode to
 			// raw text and price at the normal char/token ratio.

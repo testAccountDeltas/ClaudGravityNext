@@ -21,6 +21,14 @@ func TestRegisterHandlers_AllPathsRespond200JSON(t *testing.T) {
 		path   string
 	}{
 		{"GET", "/api/auth/current_user"},
+		{"HEAD", "/api/hello"},
+		{"GET", "/api/hello"},
+		{"GET", "/v1/oauth/hello"},
+		{"GET", "/api/web/domain_info?domain=example.com"},
+		{"GET", "/api/oauth/claude_cli/roles"},
+		{"POST", "/api/oauth/claude_cli/create_api_key"},
+		{"GET", "/api/claude_code/user_settings"},
+		{"GET", "/api/claude_code/team_memory"},
 		{"POST", "/v1/messages/cache_touch"},
 		{"GET", "/api/claude_code/settings"},
 		{"GET", "/api/claude_code/policy_limits"},

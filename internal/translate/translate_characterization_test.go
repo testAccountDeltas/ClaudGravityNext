@@ -5,6 +5,7 @@ package translate
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -31,12 +32,9 @@ func TestSealFunctionResponseTurn_TextFoldedIntoUserNote(t *testing.T) {
 		`{"functionResponse":{"name":"Read","response":{"result":"file contents"}}}`,
 		`{"text":"please also check this"}`,
 	}
-	sealed, images := sealFunctionResponseTurn(parts)
+	sealed := sealFunctionResponseTurn(parts)
 	if len(sealed) != 1 {
 		t.Fatalf("expected exactly 1 sealed part, got %d: %v", len(sealed), sealed)
-	}
-	if images != nil {
-		t.Fatalf("expected no follow-up images, got %v", images)
 	}
 	note := gjson.Get(sealed[0], "functionResponse.response.user_note").String()
 	if note != "please also check this" {
@@ -48,40 +46,40 @@ func TestSealFunctionResponseTurn_RepeatedMergeConcatenatesNotOverwrites(t *test
 	// GAP-D3-16: a growing combined parts list, across repeated merge
 	// rounds, must concatenate onto an EXISTING user_note from an earlier
 	// round rather than overwrite it.
-	firstRound, _ := sealFunctionResponseTurn([]string{
+	firstRound := sealFunctionResponseTurn([]string{
 		`{"functionResponse":{"name":"Read","response":{"result":"x"}}}`,
 		`{"text":"round one"}`,
 	})
 	secondRoundInput := append(firstRound, `{"text":"round two"}`)
-	sealed, _ := sealFunctionResponseTurn(secondRoundInput)
+	sealed := sealFunctionResponseTurn(secondRoundInput)
 	note := gjson.Get(sealed[0], "functionResponse.response.user_note").String()
 	if note != "round one\nround two" {
 		t.Fatalf("expected both rounds concatenated, got %q", note)
 	}
 }
 
-func TestSealFunctionResponseTurn_ImagesMovedToFollowUpNotNestedInResponse(t *testing.T) {
+func TestSealFunctionResponseTurn_ImagesStayInSameTurnAfterFunctionResponse(t *testing.T) {
 	parts := []string{
 		`{"functionResponse":{"name":"Read","response":{"result":"ok"}}}`,
 		`{"inlineData":{"mimeType":"image/png","data":"AAAA"}}`,
 	}
-	sealed, images := sealFunctionResponseTurn(parts)
-	if len(sealed) != 1 {
-		t.Fatalf("expected exactly 1 sealed functionResponse part, got %d", len(sealed))
+	sealed := sealFunctionResponseTurn(parts)
+	if len(sealed) != 2 {
+		t.Fatalf("expected functionResponse + image in one turn, got %d", len(sealed))
 	}
 	if gjson.Get(sealed[0], "functionResponse.parts").Exists() {
 		t.Fatalf("real Gemini FunctionResponse has no parts field — image must not nest there")
 	}
-	if len(images) != 1 {
-		t.Fatalf("expected 1 follow-up image, got %d", len(images))
+	if !gjson.Get(sealed[0], "functionResponse").Exists() || !gjson.Get(sealed[1], "inlineData").Exists() {
+		t.Fatalf("functionResponse must come first, image after: %v", sealed)
 	}
 }
 
 func TestSealFunctionResponseTurn_AllSameKindIsNoOp(t *testing.T) {
 	parts := []string{`{"text":"a"}`, `{"text":"b"}`}
-	sealed, images := sealFunctionResponseTurn(parts)
-	if len(sealed) != 2 || images != nil {
-		t.Fatalf("pure-text turn must pass through unchanged, got %v / %v", sealed, images)
+	sealed := sealFunctionResponseTurn(parts)
+	if len(sealed) != 2 {
+		t.Fatalf("pure-text turn must pass through unchanged, got %v", sealed)
 	}
 }
 
@@ -208,13 +206,13 @@ func TestConvertImageDocumentBlock_AssistantRoleBinaryImageBecomesPlaceholder(t 
 }
 
 func TestConvertImageDocumentBlock_MissingMediaTypeDefaultsPerType(t *testing.T) {
-	imgBlock := gjson.Parse(mustJSON(t, `{"type":"image","source":{"type":"base64","data":"AAAA"}}`))
+	imgBlock := gjson.Parse(mustJSON(t, `{"type":"image","source":{"type":"base64","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"}}`))
 	parts := convertImageDocumentBlock("image", imgBlock, "user")
 	if !gjson.Get(parts[0], "inlineData").Exists() || gjson.Get(parts[0], "inlineData.mimeType").String() != "image/png" {
 		t.Fatalf("expected image/png default, got %v", parts)
 	}
 
-	docBlock := gjson.Parse(mustJSON(t, `{"type":"document","source":{"type":"base64","data":"AAAA"}}`))
+	docBlock := gjson.Parse(mustJSON(t, `{"type":"document","source":{"type":"base64","data":"JVBERi0xLjQK"}}`))
 	parts = convertImageDocumentBlock("document", docBlock, "user")
 	var inline gjson.Result
 	for _, p := range parts {
@@ -228,9 +226,9 @@ func TestConvertImageDocumentBlock_MissingMediaTypeDefaultsPerType(t *testing.T)
 }
 
 func TestConvertImageDocumentBlock_DataURIPrefixStripped(t *testing.T) {
-	block := gjson.Parse(mustJSON(t, `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"data:image/png;base64,AAAA"}}`))
+	block := gjson.Parse(mustJSON(t, `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"}}`))
 	parts := convertImageDocumentBlock("image", block, "user")
-	if gjson.Get(parts[0], "inlineData.data").String() != "AAAA" {
+	if gjson.Get(parts[0], "inlineData.data").String() != "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" {
 		t.Fatalf("expected the data: URI prefix stripped, got %v", parts)
 	}
 }
@@ -1046,3 +1044,81 @@ func TestApplyGenerationConfig_ThinkingDisabled_PreservesZeroTemperature(t *test
 			t.Errorf("huge content len = %d, want 1500000", contentLen)
 		}
 	}
+
+// --- context overflow / attachments (W3) ---
+
+func overflowBody(t *testing.T, nMsgs int, textLen int) []byte {
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString(`{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[`)
+	for i := 0; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		fmt.Fprintf(&sb, `{"role":%q,"content":[{"type":"text","text":%q}]}`, role, strings.Repeat("lorem ipsum dolor sit amet ", textLen/27))
+	}
+	sb.WriteString(`,{"role":"user","content":"final question"}]}`)
+	return []byte(sb.String())
+}
+
+func TestConvert_OverflowIsErrorByDefault_TruncationOptIn(t *testing.T) {
+	SetAllowHistoryTruncation(false)
+	body := overflowBody(t, 40, 400_000) // ~16MB of text -> far over the window
+	_, err := ConvertClaudeRequestToGemini(body, config.TenantConfig{DefaultModel: "gemini-3.8-flash"}, "", "main", "s1", "", true)
+	var of *ContextOverflowError
+	if !errors.As(err, &of) {
+		t.Fatalf("want ContextOverflowError, got %v", err)
+	}
+	if of.Estimated <= of.Limit || !strings.HasPrefix(of.Error(), "prompt is too long: ") || !strings.HasSuffix(of.Error(), " maximum") {
+		t.Fatalf("bad overflow error: %v", of)
+	}
+
+	SetAllowHistoryTruncation(true)
+	defer SetAllowHistoryTruncation(false)
+	res, err := ConvertClaudeRequestToGemini(body, config.TenantConfig{DefaultModel: "gemini-3.8-flash"}, "", "main", "s2", "", true)
+	if err != nil {
+		// opt-in truncation may still fail if even the protected tail is over budget
+		if !errors.As(err, &of) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return
+	}
+	if !res.WasShrunk {
+		t.Fatal("opt-in truncation must mark WasShrunk")
+	}
+}
+
+func TestConvert_NestedScreenshotsPrunedUnderInlineLimit(t *testing.T) {
+	SetAllowHistoryTruncation(false)
+	img := fmt.Sprintf(`{"type":"image","source":{"type":"base64","media_type":"image/png","data":%q}}`, bigPNGB64(200_000))
+	var msgs []string
+	for i := 0; i < 12; i++ {
+		items := strings.TrimSuffix(strings.Repeat(img+",", 10), ",")
+		msgs = append(msgs,
+			fmt.Sprintf(`{"role":"assistant","content":[{"type":"tool_use","id":"toolu_%d","name":"Shot","input":{}}]}`, i),
+			fmt.Sprintf(`{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_%d","content":[%s]}]}`, i, items))
+	}
+	body := `{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[{"role":"user","content":"go"},` + strings.Join(msgs, ",") + `,{"role":"assistant","content":"ok"},{"role":"user","content":"next"}]}`
+	res, err := ConvertClaudeRequestToGemini([]byte(body), config.TenantConfig{DefaultModel: "gemini-3.8-flash"}, "", "main", "s3", "", true)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	total := 0
+	gjson.GetBytes(res.GeminiBody, "contents").ForEach(func(_, c gjson.Result) bool {
+		c.Get("parts").ForEach(func(_, p gjson.Result) bool {
+			total += len(p.Get("inlineData.data").String())
+			return true
+		})
+		return true
+	})
+	if total > 20<<20 {
+		t.Fatalf("inline data still %d bytes after pruning", total)
+	}
+	if !res.WasShrunk {
+		t.Fatal("pruning must be reported as shrink and persisted even with no message drop")
+	}
+}

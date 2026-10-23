@@ -313,3 +313,19 @@ func TestRecordSessionFileSnapshots_InitialSliceWithOffsetPadsLines(t *testing.T
 		t.Fatalf("lines 5-6 were overwritten: got %q, %q", lines2[4], lines2[5])
 	}
 }
+
+func TestRepairEditToolCall_StrReplaceBasedEditTool_TreatedLikeTextEditor(t *testing.T) {
+	sessionID := "sess-srbet"
+	setSessionSnapshot(sessionID, "main.go", "func a() {\n\treturn 1\n}\n", true)
+	// 4-space indent in the model's old_str vs a tab in the file.
+	args := `{"command":"str_replace","path":"main.go","old_str":"    return 1","new_str":"    return 2"}`
+	for _, name := range []string{"str_replace_editor", "str_replace_based_edit_tool"} {
+		repaired, changed := RepairEditToolCall(name, args, sessionID)
+		if !changed || strings.Contains(repaired, "    return 1") {
+			t.Fatalf("%s: expected old_str repaired to the file's tab indent, got %s (changed=%v)", name, repaired, changed)
+		}
+		if !strings.Contains(repaired, `"path"`) || strings.Contains(repaired, "file_path") {
+			t.Fatalf("%s: official arg names must not be renamed: %s", name, repaired)
+		}
+	}
+}

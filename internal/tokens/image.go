@@ -42,23 +42,44 @@ const (
 // when dimensions genuinely can't be read — a few extra tokens of
 // safety margin there is far cheaper than guessing low.
 func estimateImageTokens(b64Data string) int {
+	return estimateImageTokensP(b64Data, Gemini2Profile)
+}
+
+// imageDimensions reads the pixel dimensions from an image's header only.
+func imageDimensions(b64Data string) (width, height int, ok bool) {
 	if b64Data == "" {
-		return anthropicImageTokenFloor
+		return 0, 0, false
 	}
 	cleaned := b64util.NormalizeBase64(b64Data)
 	cfg, _, err := image.DecodeConfig(base64.NewDecoder(base64.StdEncoding, strings.NewReader(cleaned)))
-	var width, height int
 	if err == nil && cfg.Width > 0 && cfg.Height > 0 {
-		width, height = cfg.Width, cfg.Height
-	} else {
-		// Go's stdlib image package has no built-in WebP decoder, so
-		// image.DecodeConfig always fails on a WebP image — parse just the
-		// 30-byte RIFF/WebP header by hand instead.
-		if w, h, ok := decodeWebPDimensions(cleaned); ok {
-			width, height = w, h
-		} else {
-			return anthropicImageTokenFloor
+		return cfg.Width, cfg.Height, true
+	}
+	// Go's stdlib image package has no built-in WebP decoder, so
+	// image.DecodeConfig always fails on a WebP image: parse just the
+	// 30-byte RIFF/WebP header by hand instead.
+	return decodeWebPDimensions(cleaned)
+}
+
+// estimateImageTokensP prices an image under the given model-family
+// profile: Gemini 3.x by pixel area (capped), Gemini 2.x by 768px tiles.
+func estimateImageTokensP(b64Data string, prof Profile) int {
+	width, height, ok := imageDimensions(b64Data)
+	if !ok {
+		if prof.ImagePixelsPerToken > 0 {
+			return prof.ImageMaxTokens
 		}
+		return anthropicImageTokenFloor
+	}
+	if prof.ImagePixelsPerToken > 0 {
+		est := (width*height + prof.ImagePixelsPerToken - 1) / prof.ImagePixelsPerToken
+		if est > prof.ImageMaxTokens {
+			est = prof.ImageMaxTokens
+		}
+		if est < 1 {
+			est = 1
+		}
+		return est
 	}
 	wFloat, hFloat := float64(width), float64(height)
 	longest, shortest := wFloat, hFloat

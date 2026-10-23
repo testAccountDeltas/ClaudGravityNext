@@ -66,8 +66,14 @@ func TestStreaming_ContextCanceled_ReportsStatus499(t *testing.T) {
 	}()
 
 	ok, status, err := runStreamingAttempt(ctx, p, st, "test-acc", []byte(`{}`), rec, rec)
-	if !ok {
-		t.Fatalf("expected ok=true for streaming attempt that began streaming, got ok=%v", ok)
+	// Headers are committed lazily (first content block / ping), so a
+	// client that disconnects before any content leaves the response
+	// untouched: ok=false, 499, nothing written.
+	if ok {
+		t.Fatalf("expected ok=false (nothing committed to the client yet), got ok=%v", ok)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("expected no bytes written before first content, got %q", rec.Body.String())
 	}
 	if status != 499 {
 		t.Fatalf("expected status=499 (Client Closed Request) on context cancellation, got %d (err: %v)", status, err)

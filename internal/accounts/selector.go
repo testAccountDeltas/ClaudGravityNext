@@ -33,6 +33,7 @@ type AccountSelector struct {
 	affinityLRU   *list.List               // front = most recently used
 	affinityIdx   map[string]*list.Element // conversationAnchor/sessionID -> its node in affinityLRU
 	roundRobinIdx int
+	recentPicks   []string // last recentPicksWindow selected emails (selector_spread.go)
 }
 
 var globalSelector = &AccountSelector{
@@ -101,6 +102,13 @@ func (as *AccountSelector) SelectAccount(apiKey string, conversationKey string, 
 
 // SelectAccountExcluding chooses an account while skipping accounts in the excluded map (useful for Failover).
 func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey string, tenant config.TenantConfig, excluded map[string]bool) (*Record, error) {
+	return as.SelectAccountForModel(apiKey, conversationKey, tenant, excluded, "")
+}
+
+// SelectAccountForModel is SelectAccountExcluding gated on the target model:
+// an account whose (account, model) pair is cooling down after a 429 is
+// skipped for that model only. An empty model applies account-wide gates only.
+func (as *AccountSelector) SelectAccountForModel(apiKey string, conversationKey string, tenant config.TenantConfig, excluded map[string]bool, model string) (*Record, error) {
 	// Deep-copies every account's Quotas slice — fetched before taking
 	// as.mu (it only touches AccountManager's own lock, nothing in as)
 	// so this snapshot cost isn't paid while holding the selector's lock
@@ -111,6 +119,14 @@ func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey
 	as.mu.Lock()
 	defer as.mu.Unlock()
 
+	acc, err := as.selectLocked(apiKey, conversationKey, tenant, excluded, model, accountList)
+	if err == nil && acc != nil {
+		as.recordPickLocked(acc.Email)
+	}
+	return acc, err
+}
+
+func (as *AccountSelector) selectLocked(apiKey string, conversationKey string, tenant config.TenantConfig, excluded map[string]bool, model string, accountList []*Record) (*Record, error) {
 	if len(accountList) == 0 {
 		return nil, fmt.Errorf("no accounts available in pool")
 	}
@@ -124,7 +140,7 @@ func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey
 	// Must have remaining quota and not be in cooldown or excluded.
 	if tenant.StickyAccount != "" {
 		for _, acc := range accountList {
-			if acc.Email == tenant.StickyAccount && !isExcluded(acc) && hasRemainingQuota(acc) {
+			if acc.Email == tenant.StickyAccount && !isExcluded(acc) && availableFor(acc, model) {
 				return acc, nil
 			}
 		}
@@ -140,7 +156,7 @@ func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey
 			entry := el.Value.(*affinityLRUEntry)
 			if now.Before(entry.expiresAt) {
 				for _, acc := range accountList {
-					if acc.Email == entry.email && !isExcluded(acc) && hasRemainingQuota(acc) {
+					if acc.Email == entry.email && !isExcluded(acc) && availableFor(acc, model) {
 						// Refresh lease and mark as most-recently-used.
 						entry.expiresAt = now.Add(sessionAffinityTTL)
 						as.affinityLRU.MoveToFront(el)
@@ -165,7 +181,12 @@ func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey
 				}
 			}
 			for _, acc := range accountList {
-				if acc.Email == assignedEmail && !isExcluded(acc) && hasRemainingQuota(acc) {
+				if acc.Email == assignedEmail && !isExcluded(acc) && availableFor(acc, model) {
+					// Bound sticky skew for new sessions (selector_spread.go).
+					if alt := as.spreadAlternativeLocked(acc, accountList, isExcluded, model); alt != nil {
+						as.setStickyLocked(apiKey, alt.Email)
+						return alt, nil
+					}
 					return acc, nil
 				}
 			}
@@ -176,7 +197,7 @@ func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey
 	if tenant.Strategy == "round_robin" {
 		valid := make([]*Record, 0)
 		for _, acc := range accountList {
-			if !isExcluded(acc) && hasRemainingQuota(acc) {
+			if !isExcluded(acc) && availableFor(acc, model) {
 				valid = append(valid, acc)
 			}
 		}
@@ -192,7 +213,7 @@ func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey
 	var maxQuota float64 = -1.0
 
 	for _, acc := range accountList {
-		if isExcluded(acc) || !hasRemainingQuota(acc) {
+		if isExcluded(acc) || !availableFor(acc, model) {
 			continue
 		}
 		q := getEffectiveQuotaFraction(acc)
@@ -223,7 +244,7 @@ func (as *AccountSelector) SelectAccountExcluding(apiKey string, conversationKey
 	// exhausted and failing fast with 429.
 	valid := make([]*Record, 0)
 	for _, acc := range accountList {
-		if !isExcluded(acc) && (acc.CooldownUntil.IsZero() || !now.Before(acc.CooldownUntil)) {
+		if !isExcluded(acc) && (acc.CooldownUntil.IsZero() || !now.Before(acc.CooldownUntil)) && modelCooldownUntil(acc, model, now).IsZero() {
 			valid = append(valid, acc)
 		}
 	}

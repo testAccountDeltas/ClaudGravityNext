@@ -25,6 +25,7 @@ package translate
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/tidwall/gjson"
 
@@ -83,6 +84,33 @@ var fallbackMaxTokens = map[string]int64{
 	"gemini-2.5-pro":          2097152,
 	"gemini-2.5-flash-lite":   1048576,
 }
+
+// allowHistoryTruncation is the opt-in for silently dropping the oldest
+// conversation turns when the request does not fit the context window.
+// Off by default: an overflowing request is rejected with Anthropic's
+// "prompt is too long" error (see ContextOverflowError) so the client can
+// compact properly instead of the model answering from a gutted history.
+var allowHistoryTruncation atomic.Bool
+
+// SetAllowHistoryTruncation enables or disables silent history truncation
+// (config: allow_history_truncation).
+func SetAllowHistoryTruncation(v bool) { allowHistoryTruncation.Store(v) }
+
+// ContextOverflowError is returned when the request cannot fit the model's
+// context window; the HTTP layer maps it to a 400 invalid_request_error
+// "prompt is too long: N tokens > M maximum".
+type ContextOverflowError struct {
+	Estimated int64
+	Limit     int64
+}
+
+func (e *ContextOverflowError) Error() string {
+	return fmt.Sprintf("prompt is too long: %d tokens > %d maximum", e.Estimated, e.Limit)
+}
+
+// ContextWindowCeiling exposes the model's context-window size to the
+// HTTP layer (for the upstream-overflow error mapping).
+func ContextWindowCeiling(modelName string) int64 { return resolveContextWindowCeiling(modelName) }
 
 // resolveContextWindowCeiling resolves modelName's real context-window
 // token ceiling: internal/tokens.TruncateConversationToFit deliberately
@@ -200,11 +228,26 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 	// so token budget is measured against middle-truncated outputs,
 	// preventing premature or unnecessary message dropping.
 	ceiling := resolveContextWindowCeiling(modelName)
+	prof := tokens.ProfileForModel(modelName)
 	dedupSessionKey := sessionID
 	if instanceID != "" {
 		dedupSessionKey = sessionID + ":" + instanceID
 	}
-	if truncatedReq, dropped, truncated := tokens.TruncateConversationToFit(req, ceiling, requestedMaxOutputHint, dedupSessionKey); truncated {
+	// Byte-based attachment pruning (oldest first, including images nested
+	// in tool_result) keeps the total under the 20MB inlineData ceiling; the
+	// pruned copy replaces req whether or not any message gets dropped.
+	if pruned, n := tokens.PruneAttachmentsByBytes(req, tokens.MaxInlineAttachmentBytes); n > 0 {
+		req = pruned
+		wasShrunk = true
+		logx.LogGateway("[Attachments] pruned %d oldest image/document attachment(s) to stay under %d bytes [%s]", n, tokens.MaxInlineAttachmentBytes, agentKey)
+	}
+	// History truncation is opt-in; by default an overflowing prompt is
+	// rejected by the fit check below instead of being silently gutted.
+	truncatedReq, dropped, truncated := req, 0, false
+	if allowHistoryTruncation.Load() {
+		truncatedReq, dropped, truncated = tokens.TruncateConversationToFit(req, ceiling, requestedMaxOutputHint, dedupSessionKey)
+	}
+	if truncated {
 		req = truncatedReq
 		wasShrunk = true
 		logx.LogGateway("[ContextWindow] dropped %d oldest message(s) to fit %s's context window [%s]", dropped, modelName, agentKey)
@@ -265,7 +308,13 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 	out = applySystemInstruction(out, root, pendingNudgeKeys...)
 
 	// 5. Messages Translation.
+	// Grep/Glob are stripped only for the pre-3.x models; Gemini 3.x gets
+	// them unless the tenant opts back in (strip_search_tools_gemini3).
+	tenant.StripSearchTools = tenant.StripSearchTools && (!isGemini3(modelName) || tenant.StripSearchToolsGemini3)
 	tn := computeToolNameInfo(root, tenant.StripSearchTools)
+	if err := validateToolChoice(root, tn); err != nil {
+		return Result{}, err
+	}
 	translateSessionKey := sessionID
 	if instanceID != "" {
 		translateSessionKey = sessionID + ":" + instanceID
@@ -279,7 +328,13 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 	// outputs, safety settings.
 	out, budget = applyGenerationConfig(out, root, modelName, budget, isAntigravity)
 
-	estInputTokens := tokens.WeightedRequestTokens(req)
+	estInputTokens := tokens.WeightedRequestTokensFor(req, prof)
+	// Reject (instead of silently truncating) a prompt that cannot fit. The
+	// weighted estimate is used on purpose: the flat conservative one
+	// (2 bytes/token) would reject prompts Gemini accepts.
+	if limit := tokens.ContextBudget(ceiling, requestedMaxOutputHint); int64(estInputTokens) > limit {
+		return Result{}, &ContextOverflowError{Estimated: int64(estInputTokens), Limit: limit}
+	}
 
 	return Result{
 		GeminiBody:           []byte(out),

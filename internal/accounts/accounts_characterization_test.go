@@ -301,32 +301,6 @@ func TestSelectAccount_StickyAccountInCooldown_FallsBackToHealthy(t *testing.T) 
 	}
 }
 
-func TestSelectAccount_StickyAccountZeroWeeklyQuota_Skipped(t *testing.T) {
-	seedAccounts(t,
-		&Record{Email: "zero_weekly@example.com", Quotas: []QuotaGroup{
-			{DisplayName: "Gemini Models", Buckets: []QuotaBucket{
-				{Window: "5h", RemainingFraction: 0.24, ResetTime: time.Now().Add(3 * time.Hour).Format(time.RFC3339)},
-				{Window: "weekly", RemainingFraction: 0.0, ResetTime: time.Now().Add(88 * time.Hour).Format(time.RFC3339)},
-			}},
-		}},
-		&Record{Email: "backup@example.com", Quotas: []QuotaGroup{
-			{DisplayName: "Gemini Models", Buckets: []QuotaBucket{
-				{Window: "weekly", RemainingFraction: 0.85},
-			}},
-		}},
-	)
-	sel := NewAccountSelector()
-	cfg := config.TenantConfig{StickyAccount: "zero_weekly@example.com", Strategy: "sticky"}
-
-	acc, err := sel.SelectAccount("client-key", "", cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if acc.Email != "backup@example.com" {
-		t.Fatalf("expected backup account because zero_weekly has 0%% weekly quota, got %s", acc.Email)
-	}
-}
-
 func TestRecord_DoesNotSerializeSensitiveFields(t *testing.T) {
 	rec := &Record{
 		Email:        "user@example.com",
@@ -344,5 +318,47 @@ func TestRecord_DoesNotSerializeSensitiveFields(t *testing.T) {
 	}
 	if strings.Contains(s, "refresh-token") || strings.Contains(s, "access-token") {
 		t.Fatalf("tokens leaked in Record JSON: %s", s)
+	}
+}
+
+// Live evidence: Google 429s every Gemini model on an account whose weekly
+// bucket is ~0 even next to a healthy 5h bucket, so such an account is skipped.
+func TestSelectAccount_StickyAccountZeroWeeklyHealthy5h_Skipped(t *testing.T) {
+	seedAccounts(t,
+		&Record{Email: "zero_weekly@example.com", Quotas: []QuotaGroup{
+			{DisplayName: "Gemini Models", Buckets: []QuotaBucket{
+				{Window: "5h", RemainingFraction: 0.24, ResetTime: time.Now().Add(3 * time.Hour).Format(time.RFC3339)},
+				{Window: "weekly", RemainingFraction: 0.0, ResetTime: time.Now().Add(88 * time.Hour).Format(time.RFC3339)},
+			}},
+		}},
+		&Record{Email: "backup@example.com", Quotas: []QuotaGroup{
+			{DisplayName: "Gemini Models", Buckets: []QuotaBucket{{Window: "weekly", RemainingFraction: 0.85}}},
+		}},
+	)
+	sel := NewAccountSelector()
+	cfg := config.TenantConfig{StickyAccount: "zero_weekly@example.com", Strategy: "sticky"}
+	acc, err := sel.SelectAccount("client-key", "", cfg)
+	if err != nil || acc.Email != "backup@example.com" {
+		t.Fatalf("pinned account with an exhausted weekly bucket must be skipped, got %v err=%v", acc, err)
+	}
+}
+
+func TestSelectAccount_StickyAccountAllBucketsExhausted_Skipped(t *testing.T) {
+	seedAccounts(t,
+		&Record{Email: "dead@example.com", Quotas: []QuotaGroup{
+			{DisplayName: "Gemini Models", Buckets: []QuotaBucket{
+				{Window: "5h", RemainingFraction: 0.0, ResetTime: time.Now().Add(20 * time.Hour).Format(time.RFC3339)},
+				{Window: "weekly", RemainingFraction: 0.0, ResetTime: time.Now().Add(88 * time.Hour).Format(time.RFC3339)},
+			}},
+		}},
+		&Record{Email: "backup@example.com", Quotas: []QuotaGroup{
+			{DisplayName: "Gemini Models", Buckets: []QuotaBucket{{Window: "weekly", RemainingFraction: 0.85}}},
+		}},
+	)
+	sel := NewAccountSelector()
+	cfg := config.TenantConfig{StickyAccount: "dead@example.com", Strategy: "sticky"}
+	acc, err := sel.SelectAccount("client-key", "", cfg)
+	if err != nil || acc.Email != "backup@example.com" {
+		t.Fatalf("fully exhausted account must be skipped, got %v err=%v", acc, err)
 	}
 }

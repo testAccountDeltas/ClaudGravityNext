@@ -20,6 +20,9 @@ import (
 // placeholder Claude VALIDATED mode requires on a genuinely empty object
 // schema.
 func CleanJSONSchemaForAntigravity(sessionID, toolName, jsonStr string) string {
+	if toolName != "" {
+		RecordToolSchema(sessionID, toolName, jsonStr)
+	}
 	trimmed := strings.TrimSpace(jsonStr)
 	if trimmed == "" || trimmed == "{}" || (gjson.Parse(trimmed).IsObject() && len(gjson.Parse(trimmed).Map()) == 0) {
 		return `{"type":"object","properties":{"reason":{"type":"string","description":"Placeholder"}},"required":["reason"]}`

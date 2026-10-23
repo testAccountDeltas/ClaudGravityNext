@@ -129,7 +129,7 @@ func RecordSessionFileSnapshots(sessionID string, bodyBytes []byte) {
 						contentStr := c.String()
 						setSessionSnapshot(sessionID, path, contentStr, true)
 					}
-				case "edit", "update", "str_replace_editor", "notebookedit":
+				case "edit", "update", "str_replace_editor", "str_replace_based_edit_tool", "text_editor", "notebookedit":
 					// Replay same-turn edits against whatever snapshot we
 					// already have, so a second Edit on a file touched
 					// earlier in this very request compares against

@@ -5,7 +5,7 @@ package tiering
 import "testing"
 
 func TestResolveTieringAndEffort_OpusMapsToTieredModeAuto(t *testing.T) {
-	req := map[string]interface{}{"model": "claude-opus-4-5"}
+	req := map[string]interface{}{"model": "claude-opus-4-5", "thinking": map[string]interface{}{"type": "enabled"}}
 	model, budget := ResolveTieringAndEffort(req, "main", "main")
 	if model != "gemini-3.8-flash-tiered" || budget != -1 {
 		t.Fatalf("expected opus with no explicit effort to map to tiered ModeAuto (-1), got model=%q budget=%d", model, budget)
@@ -21,7 +21,7 @@ func TestResolveTieringAndEffort_HaikuIsZeroBudgetByDefault(t *testing.T) {
 }
 
 func TestResolveTieringAndEffort_AuxiliaryRequestClassIsCheapTier(t *testing.T) {
-	req := map[string]interface{}{"model": "claude-opus-4-5"}
+	req := map[string]interface{}{"model": "claude-opus-4-5", "thinking": map[string]interface{}{"type": "enabled"}}
 	model, budget := ResolveTieringAndEffort(req, "auxiliary", "main")
 	if model != "gemini-3.8-flash-low" || budget != 2048 {
 		t.Fatalf("expected auxiliary opus request to downgrade to the cheap low tier, got model=%q budget=%d", model, budget)
@@ -29,7 +29,7 @@ func TestResolveTieringAndEffort_AuxiliaryRequestClassIsCheapTier(t *testing.T) 
 }
 
 func TestResolveTieringAndEffort_LightweightSubagentIsCheapTier(t *testing.T) {
-	req := map[string]interface{}{"model": "claude-opus-4-5"}
+	req := map[string]interface{}{"model": "claude-opus-4-5", "thinking": map[string]interface{}{"type": "enabled"}}
 	model, budget := ResolveTieringAndEffort(req, "subagent", "sub:Explore")
 	if model != "gemini-3.8-flash-low" || budget != 2048 {
 		t.Fatalf("expected a known-lightweight subagent (sub:Explore) to get the cheap tier regardless of model, got model=%q budget=%d", model, budget)
@@ -53,6 +53,7 @@ func TestResolveTieringAndEffort_ExplicitEffortLevels(t *testing.T) {
 		// actually falls into the sonnet->gemini-3.8-flash mapping branch.
 		req := map[string]interface{}{
 			"model":         "claude-sonnet-4-5",
+			"thinking":      map[string]interface{}{"type": "enabled"},
 			"output_config": map[string]interface{}{"effort": c.effort},
 		}
 		model, budget := ResolveTieringAndEffort(req, "main", "main")
@@ -65,6 +66,7 @@ func TestResolveTieringAndEffort_ExplicitEffortLevels(t *testing.T) {
 func TestResolveTieringAndEffort_OpusNeverDegradesBelowMediumOnLow(t *testing.T) {
 	req := map[string]interface{}{
 		"model":         "claude-opus-4-5",
+		"thinking":      map[string]interface{}{"type": "enabled"},
 		"output_config": map[string]interface{}{"effort": "low"},
 	}
 	model, budget := ResolveTieringAndEffort(req, "main", "main")
@@ -150,11 +152,54 @@ func TestResolveTieringAndEffort_OpusMaxEffort(t *testing.T) {
 	for _, effort := range []string{"max", "xhigh", "ultracode"} {
 		req := map[string]interface{}{
 			"model":         "claude-opus-4-5",
+			"thinking":      map[string]interface{}{"type": "enabled"},
 			"output_config": map[string]interface{}{"effort": effort},
 		}
 		model, budget := ResolveTieringAndEffort(req, "main", "main")
 		if model != "gemini-3.8-flash-tiered" || budget != -1 {
 			t.Fatalf("expected opus with %q effort to map to gemini-3.8-flash-tiered (-1), got model=%q budget=%d", effort, model, budget)
 		}
+	}
+}
+
+func TestResolveTieringAndEffort_NoThinkingFieldMeansZeroBudget(t *testing.T) {
+	for _, m := range []string{"claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5", "opus"} {
+		for _, class := range []string{"main", "auxiliary", "subagent"} {
+			for _, effort := range []string{"", "low", "high", "max"} {
+				req := map[string]interface{}{"model": m}
+				if effort != "" {
+					req["output_config"] = map[string]interface{}{"effort": effort}
+				}
+				if _, budget := ResolveTieringAndEffort(req, class, "main"); budget != 0 {
+					t.Errorf("model=%s class=%s effort=%q: no thinking field must give budget 0, got %d", m, class, effort, budget)
+				}
+			}
+		}
+	}
+}
+
+func TestResolveTieringAndEffort_AdaptiveIsModeAutoExceptCheap(t *testing.T) {
+	th := map[string]interface{}{"type": "adaptive"}
+	_, b := ResolveTieringAndEffort(map[string]interface{}{"model": "claude-opus-4-5", "thinking": th}, "main", "main")
+	if b != -1 {
+		t.Fatalf("adaptive on main opus: want -1, got %d", b)
+	}
+	_, b = ResolveTieringAndEffort(map[string]interface{}{"model": "claude-opus-4-5", "thinking": th}, "auxiliary", "main")
+	if b != 2048 {
+		t.Fatalf("adaptive on auxiliary must stay cheap (2048), got %d", b)
+	}
+	_, b = ResolveTieringAndEffort(map[string]interface{}{"model": "claude-haiku-4-5", "thinking": th}, "main", "main")
+	if b != 0 {
+		t.Fatalf("adaptive on haiku must not escalate to ModeAuto, got %d", b)
+	}
+}
+
+func TestResolveTieringAndEffort_AuxiliaryExplicitBudgetCapped(t *testing.T) {
+	req := map[string]interface{}{
+		"model":    "claude-opus-4-5",
+		"thinking": map[string]interface{}{"type": "enabled", "budget_tokens": float64(16000)},
+	}
+	if _, b := ResolveTieringAndEffort(req, "auxiliary", "main"); b != 2048 {
+		t.Fatalf("auxiliary budget must be capped at 2048, got %d", b)
 	}
 }

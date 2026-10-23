@@ -30,7 +30,7 @@ func IsModifyingToolName(name string) bool {
 	// successful edit — it could inject a stop-reading nudge immediately
 	// after the model just finished modifying the file it was reading.
 	switch lower {
-	case "write", "edit", "notebookedit", "str_replace_editor", "update":
+	case "write", "edit", "notebookedit", "str_replace_editor", "str_replace_based_edit_tool", "text_editor", "update":
 		return true
 	}
 	if !strings.HasPrefix(lower, "mcp__") {

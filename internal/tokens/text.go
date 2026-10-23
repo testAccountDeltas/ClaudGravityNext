@@ -40,6 +40,19 @@ func WeightedCharTokens(text string) int {
 		return int(math.Ceil(float64(length) / 3.0))
 	}
 
+	estimated := int(math.Ceil(WeightedCharTokensFrac(text)))
+	if estimated < 1 {
+		return 1
+	}
+	return estimated
+}
+
+// WeightedCharTokensFrac is the fractional sum underlying
+// WeightedCharTokens (no ceiling, no 1-token minimum, no short-string
+// rule). It is additive across concatenated pieces, so a streaming caller
+// can accumulate it delta by delta without per-piece rounding inflating
+// the total.
+func WeightedCharTokensFrac(text string) float64 {
 	var regularAscii, digits, symbols, nonASCII, cjk int
 	for _, r := range text {
 		switch {
@@ -61,19 +74,11 @@ func WeightedCharTokens(text string) int {
 			regularAscii++
 		}
 	}
-
-	estimated := int(math.Ceil(
-		float64(regularAscii)/4.5 +
-			float64(digits)/2.0 +
-			float64(symbols)/1.5 +
-			float64(nonASCII)/1.5 +
-			float64(cjk)/1.25,
-	))
-
-	if estimated < 1 {
-		return 1
-	}
-	return estimated
+	return float64(regularAscii)/4.5 +
+		float64(digits)/2.0 +
+		float64(symbols)/1.5 +
+		float64(nonASCII)/1.5 +
+		float64(cjk)/1.25
 }
 
 // isCJK reports whether r falls in one of the main CJK (Chinese,

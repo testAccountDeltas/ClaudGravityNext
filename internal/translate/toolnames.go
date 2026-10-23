@@ -130,8 +130,7 @@ func computeToolNameInfo(root gjson.Result, stripSearchTools bool) toolNameInfo 
 				if n == "" {
 					return true
 				}
-				normName := strings.ToLower(strings.ReplaceAll(n, "_", ""))
-				if normName == "websearch" || normName == "googlesearch" || strings.HasPrefix(normName, "websearch") || strings.HasPrefix(normName, "googlesearch") {
+				if isServerSearchTool(t, n) || isUnsupportedServerTool(t, n) {
 					return true
 				}
 				if !DropSearchTools[n] {
@@ -180,8 +179,7 @@ func computeToolNameInfo(root gjson.Result, stripSearchTools bool) toolNameInfo 
 			if toolType != "" {
 				tn.disambiguatedToolName[toolType] = sanitized
 			}
-			normName := strings.ToLower(strings.ReplaceAll(n, "_", ""))
-			if normName == "websearch" || normName == "googlesearch" || strings.HasPrefix(normName, "websearch") || strings.HasPrefix(normName, "googlesearch") {
+			if isServerSearchTool(t, n) || isUnsupportedServerTool(t, n) {
 				return true
 			}
 			if stripSearchTools && DropSearchTools[n] && n != tn.earlyForcedToolName && !tn.keepSearchToolsForForcedAny {
@@ -191,7 +189,7 @@ func computeToolNameInfo(root gjson.Result, stripSearchTools bool) toolNameInfo 
 			if toolType != "" {
 				tn.effectiveToolNames[toolType] = true
 			}
-			if n == "str_replace_editor" || strings.HasPrefix(toolType, "text_editor_") || toolType == "text_editor" {
+			if n == "str_replace_editor" || n == "str_replace_based_edit_tool" || strings.HasPrefix(toolType, "text_editor_") || toolType == "text_editor" {
 				tn.declaredToolNames["text_editor"] = true
 				tn.disambiguatedToolName["text_editor"] = sanitized
 				tn.effectiveToolNames["text_editor"] = true

@@ -179,7 +179,7 @@ func TestHandleMessages_BodyExactLimitAndPlusOne(t *testing.T) {
 
 			// Create a valid JSON request whose base64 image data exceeds 20MB (e.g. 21MB)
 			// Base64 chars: 21 * 1024 * 1024
-			hugeBase64 := strings.Repeat("A", 21*1024*1024)
+			hugeBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" + strings.Repeat("A", 21*1024*1024) // valid PNG magic, then padding
 			body := `{
 				"model": "claude-sonnet-4-6",
 				"max_tokens": 100,

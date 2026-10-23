@@ -106,6 +106,12 @@ type Record struct {
 	ErrorAt       time.Time    `json:"error_at"`
 	ErrorUntil    time.Time    `json:"error_until"`
 
+	// ModelCooldowns: per-(account, model) cooldowns from upstream 429s
+	// (cooldown.go). hardCooldownUntil: the error-driven part of
+	// CooldownUntil that FetchQuota must not clear while still in the future.
+	ModelCooldowns    map[string]time.Time `json:"model_cooldowns,omitempty"`
+	hardCooldownUntil time.Time
+
 	// refreshMu serializes RefreshAccessToken calls for this one account:
 	// without it, N concurrent requests on the same account (e.g. parallel
 	// subagents) each saw a pre-refresh AccessToken and all fired their own
@@ -234,6 +240,14 @@ func (acc *Record) snapshot() *Record {
 		ErrorDetail:     acc.ErrorDetail,
 		ErrorAt:         acc.ErrorAt,
 		ErrorUntil:      acc.ErrorUntil,
+
+		hardCooldownUntil: acc.hardCooldownUntil,
+	}
+	if len(acc.ModelCooldowns) > 0 {
+		snap.ModelCooldowns = make(map[string]time.Time, len(acc.ModelCooldowns))
+		for k, v := range acc.ModelCooldowns {
+			snap.ModelCooldowns[k] = v
+		}
 	}
 	if len(acc.Quotas) > 0 {
 		snap.Quotas = make([]QuotaGroup, len(acc.Quotas))
@@ -366,18 +380,4 @@ func (am *AccountManager) InvalidateAccessToken(email string) {
 		logx.LogGateway("[AccountManager] Invalidated cached access token for %s after upstream 401", email)
 	}
 	am.mu.Unlock()
-}
-
-func (am *AccountManager) MarkAccountCooldown(email string, duration time.Duration) {
-	am.mu.Lock()
-	if acc, ok := am.accounts[email]; ok {
-		acc.CooldownUntil = time.Now().Add(duration)
-		logx.LogGateway("[AccountManager] Account %s put in cooldown for %v (429 Quota Exhausted)", email, duration)
-	}
-	am.mu.Unlock()
-
-	globalSelector.UnstickAccount(email)
-	if broadcaster != nil {
-		broadcaster.BroadcastAccounts(am.GetAccounts())
-	}
 }

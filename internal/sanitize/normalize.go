@@ -84,7 +84,7 @@ func normalizeAndTruncate(msgs []claude.Message) ([]claude.Message, bool, bool) 
 			}
 		}
 
-		newMsgs = append(newMsgs, claude.Message{Role: role, Content: normBlocks})
+		newMsgs = append(newMsgs, claude.Message{Role: role, Content: normBlocks, OutputConfig: m.OutputConfig})
 	}
 
 	return newMsgs, modified, truncatedAny

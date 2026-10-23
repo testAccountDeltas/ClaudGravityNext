@@ -15,6 +15,7 @@ import (
 	"github.com/tidwall/sjson"
 
 	"claudgravity/internal/editrepair"
+	"claudgravity/internal/logx"
 	"claudgravity/internal/schema"
 	"claudgravity/internal/toolargs"
 	"claudgravity/internal/toolcallid"
@@ -45,6 +46,7 @@ func (f *FSM) HandleFunctionCall(name string, argsRaw string, thoughtSignature s
 		// Client asked for at most one tool call per turn — silently drop
 		// any call past the first rather than streaming a second tool_use
 		// block the client explicitly said it can't handle.
+		logx.LogGateway("[Tools] disable_parallel_tool_use: dropping extra tool call %q (only the first call of a turn is kept)", name)
 		return nil
 	}
 	argsRaw = normalizeToolCallArgsToObject(name, argsRaw)
@@ -114,6 +116,9 @@ func (f *FSM) HandleFunctionCall(name string, argsRaw string, thoughtSignature s
 		_ = f.FlushTextHoldBuffer("")
 	}
 
+	if err := f.writer.Release(); err != nil { // commit point, see emitTextDelta
+		return err
+	}
 	if err := f.closeCurrentBlock(); err != nil {
 		return err
 	}

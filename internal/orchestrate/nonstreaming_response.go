@@ -97,11 +97,13 @@ func writeBlockedResponse(p *reqctx.Params, st *reqctx.State, accLabel string, c
 		respModel = st.ResolvedModelName
 	}
 	blockResp := map[string]interface{}{
-		"id":      fmt.Sprintf("msg_%d", time.Now().UnixNano()),
-		"type":    "message",
-		"role":    "assistant",
-		"model":   respModel,
-		"content": []map[string]interface{}{{"type": "text", "text": "I am unable to complete this request because it was flagged by upstream safety filters: " + blockReason}},
+		"id":    fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+		"type":  "message",
+		"role":  "assistant",
+		"model": respModel,
+		// Empty content on purpose: a refusal legitimately has none in
+		// Anthropic's real API, and the reason lives in stop_details.
+		"content": []map[string]interface{}{},
 		"usage": map[string]interface{}{
 			"input_tokens":                tokens.WeightedRequestTokens(req),
 			"output_tokens":               0,
@@ -113,7 +115,7 @@ func writeBlockedResponse(p *reqctx.Params, st *reqctx.State, accLabel string, c
 		"stop_details": map[string]interface{}{
 			"type":        "refusal",
 			"category":    "general_harms",
-			"explanation": "Content blocked by safety policy",
+			"explanation": "Content blocked by safety policy (promptFeedback.blockReason=" + blockReason + ")",
 		},
 	}
 	blockJSON, _ := json.Marshal(blockResp)

@@ -17,6 +17,8 @@ import (
 	"github.com/tidwall/gjson"
 
 	"claudgravity/internal/accounts"
+	"claudgravity/internal/cacheusage"
+	"claudgravity/internal/logx"
 	"claudgravity/internal/loopguard"
 	"claudgravity/internal/protocol/claude"
 	"claudgravity/internal/ratelimit"
@@ -151,12 +153,13 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 	if uncachedInTok < 0 {
 		uncachedInTok = 0
 	}
-	var cacheCreationTok int64
-	if uncachedInTok > cacheCreationThreshold(req.Model) && hasCacheControlBreakpoint(claudeBodyBytes) {
-		frac := cacheBreakpointPrefixFraction(claudeBodyBytes)
-		cacheCreationTok = int64(float64(uncachedInTok) * frac)
-		uncachedInTok -= cacheCreationTok
-	}
+	// Cache write accounting never invents numbers (see cacheusage.Split):
+	// only when a breakpoint exists, upstream read nothing from cache and
+	// the prefix reaches the model's documented minimum.
+	cacheInfo := cacheusage.Analyze(claudeBodyBytes)
+	cc5m, cc1h := cacheusage.Split(req.Model, uncachedInTok, cacheTok, cacheInfo.PrefixFrac, cacheInfo.Frac1h)
+	cacheCreationTok := cc5m + cc1h
+	uncachedInTok -= cacheCreationTok
 
 	cwdKey := p.SessionID
 	if p.InstanceID != "" {
@@ -177,6 +180,7 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 		"input_tokens":                uncachedInTok,
 		"output_tokens":               outTok,
 		"cache_creation_input_tokens": cacheCreationTok,
+		"cache_creation":              cacheusage.Object(cc5m, cc1h),
 		"cache_read_input_tokens":     cacheTok,
 	}
 	// GAP-TH-07
@@ -186,20 +190,15 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 		}
 	}
 
-	stopReason := "end_turn"
-	var stopDetails map[string]interface{}
 	finishReason := geminiJSON.Get("candidates.0.finishReason").String()
-	switch {
-	case finishReason == "MAX_TOKENS":
-		stopReason = "max_tokens"
-	case finishReason == "SAFETY" || finishReason == "RECITATION" || finishReason == "BLOCKLIST" ||
-		finishReason == "PROHIBITED_CONTENT" || finishReason == "SPII" || finishReason == "MALICIOUS" ||
-		finishReason == "LANGUAGE" || finishReason == "IMAGE_SAFETY":
-		stopReason = "refusal"
+	finishClass := stream.ClassifyFinishReason(finishReason)
+	stopReason := finishClass.StopReason
+	var stopDetails map[string]interface{}
+	if stopReason == "refusal" {
 		stopDetails = map[string]interface{}{
 			"type":        "refusal",
 			"category":    "general_harms",
-			"explanation": "Content blocked by safety policy",
+			"explanation": "Content blocked by safety policy (finishReason=" + finishReason + ")",
 		}
 	}
 
@@ -224,35 +223,58 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 	toolsCalled, toolCallIDs, toolCallSignatures := cr.toolsCalled, cr.toolCallIDs, cr.toolCallSignatures
 	textChars, thinkingChars, lastText, lastThinking := cr.textChars, cr.thinkingChars, cr.lastText, cr.lastThinking
 
+	// A bad turn (abnormal finishReason with no usable tool call, or an
+	// empty turn) is NOT a response: nothing has been written yet, so
+	// report it as a retryable error instead of a 200 end_turn.
+	hasToolUse := len(cr.toolCallIDs) > 0
+	prefillOnly := p.PrefillText != "" && !hasToolUse && textChars == 0 &&
+		finishClass.StopReason == "end_turn" && !finishClass.ToolFailure
+	if finishClass.StopReason == "max_tokens" && !st.OutputAllowanceBumped && textChars == 0 && !hasToolUse &&
+		(thinkingTok > 0 || thinkingChars > 0) {
+		// Output limit hit while thinking, nothing visible: retried once
+		// with a widened allowance (pipeline.go), then reported as is.
+		terr := &stream.UpstreamTurnError{ErrType: "overloaded_error", Status: http.StatusServiceUnavailable,
+			FinishReason: finishReason, NeedsMoreOutput: true,
+			Msg: "upstream hit the output token limit while thinking, before any visible output"}
+		logFailure(terr.Status, terr.Error())
+		return false, terr.Status, terr
+	}
+	if terr := finishClass.CheckTurn(finishReason, textChars > 0, hasToolUse); terr != nil && !prefillOnly {
+		logx.LogGateway("[#%d] << non-streaming turn failed (retryable): finishReason=%q err=%v usage in=%d out=%d", p.RID, finishReason, terr, inTok, outTok)
+		logFailure(terr.Status, terr.Error())
+		return false, terr.Status, terr
+	}
+
 	if claudeResp["stop_reason"] == "end_turn" {
-		for _, seq := range req.StopSequences {
-			if seq != "" && strings.HasSuffix(lastText, seq) {
-				claudeResp["stop_reason"] = "stop_sequence"
-				claudeResp["stop_sequence"] = seq
-				// GAP-D1-07: Anthropic's contract excludes the matched
-				// stop sequence from the returned text — the whole point
-				// of asking for one is that the client never sees it.
-				// The full response is already built here (unlike the
-				// streaming path, which has already sent these exact
-				// characters to the client over SSE before this check
-				// ever runs and can't retroactively un-send them — that
-				// side of this gap is left as a known limitation), so
-				// trim it off the last text content block before
-				// responding.
-				if blocks, ok := claudeResp["content"].([]map[string]interface{}); ok {
-					for i := len(blocks) - 1; i >= 0; i-- {
-						if blocks[i]["type"] == "text" {
-							if txt, ok := blocks[i]["text"].(string); ok {
-								blocks[i]["text"] = strings.TrimSuffix(txt, seq)
-							}
-							break
-						}
+		// UNCERTAIN: Gemini normally strips a matched stopSequence from the
+		// output with a plain STOP finishReason, in which case there is no
+		// signal and this stays end_turn. When the sequence IS echoed back
+		// it is detected anywhere in the last text block (not only as a
+		// suffix) and the text is cut at its first occurrence (GAP-D1-07:
+		// the client must never see the matched sequence).
+		if blocks, ok := claudeResp["content"].([]map[string]interface{}); ok {
+			for i := len(blocks) - 1; i >= 0; i-- {
+				if blocks[i]["type"] != "text" {
+					continue
+				}
+				txt, _ := blocks[i]["text"].(string)
+				bestIdx, bestSeq := -1, ""
+				for _, seq := range req.StopSequences {
+					if idx := strings.Index(txt, seq); seq != "" && idx >= 0 && (bestIdx < 0 || idx < bestIdx) {
+						bestIdx, bestSeq = idx, seq
 					}
+				}
+				if bestSeq != "" {
+					claudeResp["stop_reason"] = "stop_sequence"
+					claudeResp["stop_sequence"] = bestSeq
+					blocks[i]["text"] = txt[:bestIdx]
 				}
 				break
 			}
 		}
 	}
+
+	enforceMaxTokens(claudeResp, usageMap, req.MaxTokens, outTok-thinkingTok, thinkingTok, hasToolUse)
 
 	if p.HasSafeguards {
 		toolUsesMap := make(map[string]interface{})
@@ -303,18 +325,17 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 	}
 	loopguard.Global().RecordToolCalls(loopKey, oscillationCalls, hasIgnoreTag)
 
-	if contentBlocks, ok := claudeResp["content"].([]map[string]interface{}); ok && len(contentBlocks) == 0 {
-		// Anthropic's Message.content has minItems:1.
-		// GAP-D1-06: honor prefill contract when model returns nothing.
-		emptyText := "(empty response)"
-		if claudeResp["stop_reason"] == "refusal" {
-			emptyText = "I'm not able to help with that request."
-		} else if p.PrefillText != "" {
-			emptyText = p.PrefillText
-		}
+	// No placeholder text is injected for an empty content array: a refusal
+	// or max_tokens-before-any-output legitimately returns content:[] in
+	// Anthropic's real API, and the old "(empty response)" / "I'm not able
+	// to help" fillers were stored by clients as real assistant turns.
+	// GAP-D1-06: a turn that produced nothing beyond the client's own
+	// prefill still returns the prefix (real client text, not a filler).
+	if contentBlocks, ok := claudeResp["content"].([]map[string]interface{}); ok && len(contentBlocks) == 0 &&
+		p.PrefillText != "" && claudeResp["stop_reason"] != "refusal" {
 		claudeResp["content"] = append(contentBlocks, map[string]interface{}{
 			"type": "text",
-			"text": emptyText,
+			"text": p.PrefillText,
 		})
 	}
 
@@ -329,6 +350,9 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(outJSON)
 	speccapture.Global().RecordClaudeResponse(p.RID, w.Header(), outJSON)
+
+	logx.LogGateway("[#%d] << finishReason=%q stop_reason=%v usage in=%d out=%d cache_read=%d cache_creation=%d tools=%v",
+		p.RID, finishReason, claudeResp["stop_reason"], uncachedInTok, outTok, cacheTok, cacheCreationTok, toolsCalled)
 
 	durMs := time.Since(st.StartedAt).Milliseconds()
 	var hitRate float64

@@ -720,3 +720,35 @@ func TestSanitize_DedupRepeatedRead_RelativePathNotMutatedInInput(t *testing.T) 
 	}
 }
 
+
+// Empty role:"system" messages mid-conversation (content "", [] or
+// [{text:""}]) must be dropped, not turned into a bare "[System Note]: "
+// user turn; an output_config they carry moves to the adjacent turn.
+func TestSanitize_EmptyMidConversationSystemMessage_Dropped(t *testing.T) {
+	for _, empty := range []string{`""`, `[]`, `[{"type":"text","text":""}]`} {
+		reqJSON := `{
+			"model": "m", "max_tokens": 10,
+			"messages": [
+				{"role": "user", "content": "go"},
+				{"role": "assistant", "content": "ok"},
+				{"role": "system", "content": ` + empty + `, "output_config": {"effort": "low"}},
+				{"role": "user", "content": "continue"}
+			]
+		}`
+		res := SanitizeMessagesAndGraph(mustReq(t, reqJSON))
+		for _, m := range res.Request.Messages {
+			for _, b := range m.Content {
+				if tb, ok := b.AsText(); ok && strings.Contains(tb.Text, "[System Note]") {
+					t.Fatalf("content %s: empty system message became %q", empty, tb.Text)
+				}
+			}
+		}
+		if len(res.Request.Messages) != 3 {
+			t.Fatalf("content %s: want 3 messages after dropping, got %d", empty, len(res.Request.Messages))
+		}
+		last := res.Request.Messages[len(res.Request.Messages)-1]
+		if !strings.Contains(string(last.OutputConfig), "low") {
+			t.Fatalf("content %s: output_config effort not carried to adjacent turn: %q", empty, last.OutputConfig)
+		}
+	}
+}

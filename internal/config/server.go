@@ -22,6 +22,7 @@ type ServerConfig struct {
 	SpecCaptureRetentionDays        int    `json:"spec_capture_retention_days,omitempty"`          // defaults to 14; capture files are named by UTC date and pruned on each day rotation
 	SpecCaptureRawChunksEnabled     *bool  `json:"spec_capture_raw_chunks_enabled,omitempty"`      // records UNREDACTED raw Gemini streaming chunks under <dir>/raw_chunks/, for the StreamFSM replay corpus. nil (absent) defaults to FALSE — unlike the redacted capture above, this keeps real generative text, so it's opt-in, meant to be switched on only long enough to accumulate a corpus.
 	SpecCaptureRawChunksMaxSessions int    `json:"spec_capture_raw_chunks_max_sessions,omitempty"` // defaults to 100; oldest raw_chunks/*.ndjson files are deleted once this count is exceeded
+	AllowHistoryTruncation          bool   `json:"allow_history_truncation,omitempty"`             // opt-in: silently drop the oldest turns when a prompt exceeds the context window. Default false: such a request is rejected with Anthropic's "prompt is too long: N tokens > M maximum" 400 so the client can compact.
 	SpecCaptureRawChunksMaxBytes    int64  `json:"spec_capture_raw_chunks_max_bytes,omitempty"`    // defaults to 50MB; oldest raw_chunks/*.ndjson files are deleted once the directory exceeds this total size
 }
 

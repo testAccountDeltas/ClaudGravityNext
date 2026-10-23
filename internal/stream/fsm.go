@@ -7,7 +7,6 @@ package stream
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -58,6 +57,13 @@ type FSM struct {
 	cacheTokens    int64
 	thinkingTokens int64 // GAP-TH-07: the thinking-only subset of outputTokens, for usage.output_tokens_details.thinking_tokens
 
+	// Client max_tokens enforcement on visible text (visiblecap.go).
+	visibleCap         int64   // client max_tokens; 0 = no cap
+	visibleEst         float64 // estimated tokens of text emitted so far
+	candTokens         int64   // upstream candidatesTokenCount (visible, excludes thoughts)
+	capReached         bool
+	retryEmptyMaxToken bool // an empty MAX_TOKENS turn that only thought may be retried once with a larger allowance
+
 	toolUseOccurred    bool
 	textChars          int
 	thinkingChars      int
@@ -101,6 +107,7 @@ type FSM struct {
 	preferRussian          bool
 	syntheticReasonTools   map[string]bool
 	cachePrefixFrac        float64
+	cacheFrac1h            float64
 	disableParallelToolUse bool
 	reverseToolNameMap     map[string]string
 	stopSequences          []string
@@ -110,6 +117,14 @@ type FSM struct {
 	prefillText         string
 	prefillEmitted      bool
 	pendingFinishReason string
+
+	// finalFinishReason / finalStopReason: what the upstream said and what
+	// was reported, for the per-request log (Stats).
+	finalFinishReason string
+	finalStopReason   string
+	// refusalDetail overrides stop_details.explanation (a prompt-level
+	// promptFeedback block has no candidate finishReason to cite).
+	refusalDetail string
 }
 
 // NewFSM constructs an FSM for one request. p's fields are the request's
@@ -140,12 +155,15 @@ func NewFSM(writer *SafeSSEWriter, rid uint64, p *reqctx.Params, st *reqctx.Stat
 		preferRussian:          p.PreferRussian,
 		syntheticReasonTools:   p.SyntheticReasonTools,
 		cachePrefixFrac:        st.CachePrefixFrac,
+		cacheFrac1h:            st.CacheFrac1h,
 		disableParallelToolUse: p.DisableParallelToolUse,
 		reverseToolNameMap:     p.ReverseToolNameMap,
 		hasPriorTurns:          p.HasPriorTurns,
 		stopSequences:          p.StopSequences,
 		maxStopLen:             maxStopLen,
 		prefillText:            p.PrefillText,
+		visibleCap:             p.MaxTokens,
+		retryEmptyMaxToken:     !st.OutputAllowanceBumped,
 	}
 }
 
@@ -212,15 +230,17 @@ func (f *FSM) closeCurrentBlock() error {
 }
 
 // HandleThinking streams one thinking delta, opening a new "thinking"
-// block first if needed. A second thinking block within the same turn
-// (Gemini can interleave thought->text->thought) is dropped rather than
-// folded into HandleText — leaking reasoning tokens into the user-visible
-// text stream is far worse than silently discarding a redundant chunk.
+// block first if needed. Gemini can interleave thought->text->thought;
+// each later thought becomes its own additional thinking block (valid in
+// the Anthropic content array) rather than being folded into HandleText —
+// leaking reasoning tokens into the user-visible text stream would be far
+// worse. Thinking after a tool_use block is still dropped: the turn ends
+// at the tool call.
 func (f *FSM) HandleThinking(text string, thoughtSignature string) error {
 	if err := f.EnsureMessageStart(); err != nil {
 		return err
 	}
-	if (f.thinkingFinished || f.currentIndex >= 0) && f.currentBlock != BlockThinking {
+	if f.toolUseOccurred && f.currentBlock != BlockThinking {
 		return nil
 	}
 	if f.currentBlock != BlockThinking {
@@ -258,63 +278,6 @@ func (f *FSM) HandleThinking(text string, thoughtSignature string) error {
 	}
 	f.thinkingChars += len(text)
 	f.lastThinking += text
-	b, _ := json.Marshal(deltaPayload)
-	return f.writer.EmitEvent("content_block_delta", string(b))
-}
-
-// FlushTextHoldBuffer emits any held-back text accumulated by the stop-sequence
-// buffer. If stripSeq is non-empty and the held text ends in stripSeq, that suffix
-// is stripped before emission so the client never sees the stop sequence tokens.
-func (f *FSM) FlushTextHoldBuffer(stripSeq string) error {
-	if f.textHoldBuffer == "" {
-		return nil
-	}
-	text := f.textHoldBuffer
-	f.textHoldBuffer = ""
-	if stripSeq != "" && strings.HasSuffix(text, stripSeq) {
-		text = strings.TrimSuffix(text, stripSeq)
-	}
-	text = sanitize.StripSyntheticXMLTags(text)
-	if text == "" {
-		return nil
-	}
-	return f.emitTextDelta(text)
-}
-
-func (f *FSM) emitTextDelta(text string) error {
-	if text == "" {
-		return nil
-	}
-	if f.currentBlock != BlockText {
-		if err := f.closeCurrentBlock(); err != nil {
-			return err
-		}
-		f.currentIndex++
-		f.currentBlock = BlockText
-
-		startPayload := map[string]interface{}{
-			"type":  "content_block_start",
-			"index": f.currentIndex,
-			"content_block": map[string]interface{}{
-				"type": "text",
-				"text": "",
-			},
-		}
-		b, _ := json.Marshal(startPayload)
-		if err := f.writer.EmitEvent("content_block_start", string(b)); err != nil {
-			return err
-		}
-	}
-
-	deltaPayload := map[string]interface{}{
-		"type":  "content_block_delta",
-		"index": f.currentIndex,
-		"delta": map[string]interface{}{
-			"type": "text_delta",
-			"text": text,
-		},
-	}
-	f.textChars += len(text)
 	b, _ := json.Marshal(deltaPayload)
 	return f.writer.EmitEvent("content_block_delta", string(b))
 }
@@ -374,7 +337,16 @@ func (f *FSM) HandleText(text string) error {
 		f.textHoldBuffer = ""
 	}
 
-	return f.emitTextDelta(text)
+	if err := f.emitTextDelta(text); err != nil {
+		return err
+	}
+	if f.capReached {
+		// The client's max_tokens is spent: stop forwarding anything else
+		// and end the turn (a no-op when already inside FinishStream).
+		f.textHoldBuffer = ""
+		return f.FinishStream("MAX_TOKENS")
+	}
+	return nil
 }
 
 // HasFinished reports whether FinishStream or FinishWithError has already completed.

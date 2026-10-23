@@ -86,15 +86,21 @@ func WriteAnthropicError(w http.ResponseWriter, status int, errType, message str
 	if errType == "overloaded_error" {
 		wireStatus = 529
 	}
+	if shouldRetry(wireStatus) {
+		h.Set("x-should-retry", "true")
+	} else {
+		h.Set("x-should-retry", "false")
+	}
 
 	if status == http.StatusTooManyRequests {
 		// 900s matches MarkAccountCooldown's own 15-minute cooldown window
 		// for a 429/RESOURCE_EXHAUSTED account elsewhere in this gateway —
 		// a client honoring Retry-After literally that retries in 5s (the
 		// old value) hits the exact same cooldown again immediately.
-		h.Set("Retry-After", "900")
+		ra := poolRetryAfter()
+		h.Set("Retry-After", fmt.Sprintf("%d", int(ra.Seconds())))
 		if h.Get("anthropic-ratelimit-unified-reset") == "" {
-			h.Set("anthropic-ratelimit-unified-reset", fmt.Sprintf("%d", time.Now().Add(15*time.Minute).Unix()))
+			h.Set("anthropic-ratelimit-unified-reset", fmt.Sprintf("%d", time.Now().Add(ra).Unix()))
 			h.Set("anthropic-ratelimit-unified-status", "rejected")
 		}
 		if h.Get("anthropic-ratelimit-unified-representative-claim") == "" {
@@ -113,12 +119,12 @@ func WriteAnthropicError(w http.ResponseWriter, status int, errType, message str
 		if h.Get("anthropic-ratelimit-unified-5h-status") == "" {
 			h.Set("anthropic-ratelimit-unified-5h-status", "rejected")
 			h.Set("anthropic-ratelimit-unified-5h-utilization", "1.0")
-			h.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", time.Now().Add(15*time.Minute).Unix()))
+			h.Set("anthropic-ratelimit-unified-5h-reset", fmt.Sprintf("%d", time.Now().Add(ra).Unix()))
 		}
 		if h.Get("anthropic-ratelimit-unified-7d-status") == "" {
 			h.Set("anthropic-ratelimit-unified-7d-status", "rejected")
 			h.Set("anthropic-ratelimit-unified-7d-utilization", "1.0")
-			h.Set("anthropic-ratelimit-unified-7d-reset", fmt.Sprintf("%d", time.Now().Add(15*time.Minute).Unix()))
+			h.Set("anthropic-ratelimit-unified-7d-reset", fmt.Sprintf("%d", time.Now().Add(ra).Unix()))
 		}
 		h.Set("anthropic-ratelimit-requests-remaining", "0")
 		h.Set("anthropic-ratelimit-tokens-remaining", "0")
@@ -133,8 +139,8 @@ func WriteAnthropicError(w http.ResponseWriter, status int, errType, message str
 		} else {
 			h.Set("anthropic-ratelimit-tokens-limit", "1000000")
 		}
-		setSplitTokenRateLimitHeaders(h, tokLimit, 0, time.Now().Add(15*time.Minute))
-		resetAt := time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339)
+		setSplitTokenRateLimitHeaders(h, tokLimit, 0, time.Now().Add(ra))
+		resetAt := time.Now().Add(ra).UTC().Format(time.RFC3339)
 		if h.Get("anthropic-ratelimit-requests-reset") == "" {
 			h.Set("anthropic-ratelimit-requests-reset", resetAt)
 		}
@@ -196,6 +202,7 @@ func WriteAnthropicError(w http.ResponseWriter, status int, errType, message str
 			"type":    errType,
 			"message": message,
 		},
+		"request_id": rid,
 	})
 	_, _ = w.Write(body)
 }

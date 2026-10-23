@@ -7,6 +7,7 @@
 package httpapi
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -106,6 +107,13 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		return
 	}
 
+	// Hint-header fallback: classify helper requests (title/summary/topic)
+	// that arrive without x-claude-code-request-class, and treat a
+	// parent-agent-id header as a subagent request. Unknown/unsupported
+	// request fields are accepted and ignored (see logIgnoredFields).
+	reqClass = classifyReqClass(r, reqClass, bodyBytes)
+	logIgnoredFields(rid, bodyBytes)
+
 	// 2. Derive Conversation Anchor for Session Affinity (Prompt Caching).
 	headerSessionID := r.Header.Get("x-claude-code-session-id")
 	if headerSessionID == "" {
@@ -165,9 +173,17 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 
 	// 3. Full translation: tiering, LoopGuard, middle-truncation,
 	// sanitizer.
+	serverCfg := cfgMgr.GetServerConfig()
+	translate.SetAllowHistoryTruncation(serverCfg.AllowHistoryTruncation)
 	isAntigravity := !(tenant.GoogleAuthType == "api_key" && tenant.GoogleAPIKey != "" && tenant.GoogleAPIKey != "YOUR_GEMINI_API_KEY_HERE")
 	result, err := translate.ConvertClaudeRequestToGemini(bodyBytes, tenant, reqClass, agentKey, sessionID, instanceID, isAntigravity)
 	if err != nil {
+		var overflow *translate.ContextOverflowError
+		if errors.As(err, &overflow) {
+			logx.LogGateway("[#%d] Context overflow (pre-flight): %v", rid, err)
+			WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error", overflow.Error())
+			return
+		}
 		logx.LogGateway("[#%d] Translation error: %v", rid, err)
 		WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "Translation error: "+err.Error())
 		return
@@ -183,7 +199,6 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 	speccapture.Global().SetSessionMeta(rid, sessionID, agentKey)
 
 	isStream := gjson.GetBytes(bodyBytes, "stream").Bool()
-	serverCfg := cfgMgr.GetServerConfig()
 
 	hasSafeguards := gjson.GetBytes(bodyBytes, "safeguards").Exists()
 	_, hasFlusher := w.(http.Flusher)
@@ -216,6 +231,9 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		EstInputTokens:    result.EstimatedInputTokens,
 	}
 
+	if isStream {
+		setSSEHeaders(w, r)
+	}
 	o := &orchestrate.Orchestrator{}
 	wrote, status, execErr := o.Execute(r.Context(), p, st, w)
 	if wrote {
@@ -223,7 +241,16 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 	}
 	if execErr != nil {
 		logx.LogGateway("[#%d] !! All pre-stream failover attempts failed: %v", rid, execErr)
-		WriteAnthropicError(w, status, anthropicerr.TypeForStatus(status), "Upstream failed after retries: "+execErr.Error())
+		// Google's context-overflow 400 -> Anthropic's exact wording, which is
+		// what Claude Code's auto-compaction keys on (streaming and not).
+		if anthropicerr.IsContextExceeded(status, execErr.Error()) {
+			WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error",
+				anthropicerr.PromptTooLongMessage(execErr.Error(), int64(st.EstInputTokens), translate.ContextWindowCeiling(result.ResolvedModel)))
+			return
+		}
+		// The raw upstream text (possibly Google JSON) stays in the log
+		// line above; the client gets a short sanitised message.
+		WriteAnthropicError(w, status, anthropicerr.TypeForStatus(status), ClientUpstreamMessage(status, execErr.Error()))
 	}
 }
 

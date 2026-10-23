@@ -39,7 +39,28 @@ type SafeSSEWriter struct {
 	headersSent   bool
 	finished      bool
 	lastEventTime time.Time
+
+	// commitHook, when set, runs once immediately before the first byte
+	// this writer puts on the wire (event or ping) — the owner uses it to
+	// write the HTTP 200 + SSE headers lazily, so a request that fails
+	// before producing anything never commits a status line.
+	commitHook func()
+	hookDone   bool
+
+	// holding buffers every non-ping event (message_start, thinking, ...)
+	// until Release: nothing of the turn reaches the client before the
+	// first visible content (or a clean finish), so a bad turn can still be
+	// discarded and retried on another account.
+	holding   bool
+	held      []heldEvent
+	heldBytes int
 }
+
+type heldEvent struct{ event, data string }
+
+// maxHeldBytes force-releases a hold that grew past this size (an enormous
+// thinking block) so buffering can never become unbounded.
+const maxHeldBytes = 512 * 1024
 
 // NewSafeSSEWriter constructs a writer for one request's SSE response.
 // recorder may be nil.
@@ -69,12 +90,98 @@ func (s *SafeSSEWriter) EmitEvent(event string, data string) error {
 	if s.finished {
 		return nil
 	}
-	s.commitHeadersLocked()
+	if s.holding && event != "ping" {
+		s.held = append(s.held, heldEvent{event, data})
+		s.heldBytes += len(data)
+		if s.heldBytes > maxHeldBytes {
+			return s.releaseLocked()
+		}
+		return nil
+	}
+	return s.writeEventLocked(event, data)
+}
+
+func (s *SafeSSEWriter) writeEventLocked(event, data string) error {
+	s.commitLocked()
 	s.lastEventTime = time.Now()
 	if s.recorder != nil {
 		s.recorder.AppendClaudeEvent(s.rid, event, data)
 	}
 	return writeAndFlush(s.w, s.flusher, formatSSEEvent(event, data))
+}
+
+// commitLocked runs the lazy-commit hook (once) and marks headers sent.
+func (s *SafeSSEWriter) commitLocked() {
+	if s.commitHook != nil && !s.hookDone {
+		s.hookDone = true
+		s.commitHook()
+	}
+	s.commitHeadersLocked()
+}
+
+// SetCommitHook registers the function that writes the HTTP status line and
+// headers; it runs once, right before this writer's first byte.
+func (s *SafeSSEWriter) SetCommitHook(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.commitHook = fn
+}
+
+// Commit forces the commit hook now (early-headers keepalive path).
+func (s *SafeSSEWriter) Commit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.commitLocked()
+}
+
+// HoldEvents starts buffering every non-ping event until Release.
+func (s *SafeSSEWriter) HoldEvents() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.holding = true
+}
+
+// Release flushes the buffered events in order and stops buffering. A
+// no-op when not holding.
+func (s *SafeSSEWriter) Release() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.releaseLocked()
+}
+
+func (s *SafeSSEWriter) releaseLocked() error {
+	if !s.holding {
+		return nil
+	}
+	s.holding = false
+	held := s.held
+	s.held, s.heldBytes = nil, 0
+	if s.finished {
+		return nil
+	}
+	for _, e := range held {
+		if err := s.writeEventLocked(e.event, e.data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DiscardHeld drops the buffered events and finishes the writer — the
+// attempt failed before any content reached the client.
+func (s *SafeSSEWriter) DiscardHeld() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.held, s.heldBytes = nil, 0
+	s.finished = true
+}
+
+// IsReleased reports whether buffered events (if any were ever held) have
+// reached the client, i.e. the turn can no longer be silently retried.
+func (s *SafeSSEWriter) IsReleased() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.holding
 }
 
 // SendKeepalivePing writes a ping frame, throttled to at most once every
@@ -93,7 +200,7 @@ func (s *SafeSSEWriter) SendKeepalivePing() error {
 	// with "superfluous response.WriteHeader" — the exact GAP-D1-01 shape
 	// this writer exists to prevent, just reached through the ping path
 	// instead of EmitEvent.
-	s.commitHeadersLocked()
+	s.commitLocked()
 	s.lastEventTime = time.Now()
 	return writeAndFlush(s.w, s.flusher, formatSSEKeepalivePing())
 }

@@ -87,7 +87,7 @@ func dedupeRepeatedReads(msgs []claude.Message, sessionID string) ([]claude.Mess
 				newBlocks[bi] = b
 			}
 		}
-		out[mi] = claude.Message{Role: m.Role, Content: newBlocks}
+		out[mi] = claude.Message{Role: m.Role, Content: newBlocks, OutputConfig: m.OutputConfig}
 	}
 	return out, modified
 }

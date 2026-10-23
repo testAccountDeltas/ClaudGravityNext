@@ -113,7 +113,10 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 	}
 
 	part := `{"functionCall":{"name":"","args":{}}}`
-	if isAntigravity {
+	// Gemini attaches the thought signature to the FIRST functionCall of a
+	// parallel group only (ai.google.dev "thought signatures"); replaying
+	// the same signature on every sibling is not what the model produced.
+	if isAntigravity && isFirstReplayedCall(p, content, tn) {
 		part, _ = sjson.Set(part, "thoughtSignature", sig)
 	}
 	// disambiguatedToolName (computed once, up front) must be used so a
@@ -131,4 +134,25 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 	}
 	part, _ = sjson.SetRaw(part, "functionCall.args", argsRaw)
 	return []string{part}
+}
+
+// isFirstReplayedCall reports whether p is the first tool_use block of its
+// assistant message that is replayed as a real functionCall (a tool this
+// request no longer declares is replayed as prose and does not count). A
+// message without sibling context (content not an array) is its own group.
+func isFirstReplayedCall(p gjson.Result, content gjson.Result, tn toolNameInfo) bool {
+	if !content.IsArray() {
+		return true
+	}
+	first := true
+	found := false
+	content.ForEach(func(_, b gjson.Result) bool {
+		if b.Get("type").String() != "tool_use" || !tn.effectiveToolNames[b.Get("name").String()] {
+			return true
+		}
+		found = true
+		first = b.Raw == p.Raw || (p.Get("id").String() != "" && b.Get("id").String() == p.Get("id").String())
+		return false
+	})
+	return first || !found
 }

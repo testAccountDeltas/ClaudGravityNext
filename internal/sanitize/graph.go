@@ -84,7 +84,7 @@ func enforceToolGraphConsistency(msgs []claude.Message) ([]claude.Message, bool)
 		for _, id := range thisMsgToolUseIDs {
 			toolUsesSeen[id] = true
 		}
-		out[mi] = claude.Message{Role: m.Role, Content: newBlocks}
+		out[mi] = claude.Message{Role: m.Role, Content: newBlocks, OutputConfig: m.OutputConfig}
 	}
 
 	return out, modified

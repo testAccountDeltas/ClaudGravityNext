@@ -57,6 +57,7 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 	// 3rd-party native-passthrough model that genuinely doesn't support
 	// thinking gets Thinking is not supported for this model if sent one;
 	// an unrecognized model still gets the existing best-effort behavior.
+	internalReasoning := 0
 	if !forcedAny && (!hasMeta || modelMeta.Thinking) {
 		// GAP-TH-04: the floor only applies to a STRICTLY POSITIVE
 		// budget about to be sent — budget==0 is the client's explicit
@@ -75,6 +76,18 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 		// doesn't run at all). Gemini's own knob for "run it but don't
 		// return it" is includeThoughts:false.
 		includeThoughts := budget != 0
+		sendBudget := budget
+		if budget == 0 && hasMeta && modelMeta.MinThinkingBudget > 0 {
+			// The client did not enable thinking, but this model cannot
+			// switch it off (catalog MinThinkingBudget > 0). Run the
+			// smallest reasoning the model allows, never return it
+			// (includeThoughts stays false), and reserve exactly that
+			// much extra maxOutputTokens below so it cannot starve the
+			// visible answer. Visible output is still capped at the
+			// client's max_tokens by the stream layer.
+			internalReasoning = modelMeta.MinThinkingBudget // thinkingBudget sent = the model's smallest allowed
+			sendBudget = internalReasoning
+		}
 		if root.Get("thinking.display").String() == "omitted" {
 			includeThoughts = false
 		}
@@ -92,7 +105,7 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 				out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingBudget", 8192)
 			}
 		} else {
-			out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingBudget", budget)
+			out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingBudget", sendBudget)
 		}
 	}
 	if forcedAny {
@@ -259,6 +272,19 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 				budget = int(ceiling) - 1024
 				out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingBudget", budget)
 			}
+		}
+	}
+
+	// Unavoidable internal reasoning of a model that cannot disable thinking
+	// (client did not enable it): a generous allowance on top of max_tokens
+	// (InternalReasoningAllowance, never below the model floor), clamped to
+	// the model ceiling. The actual thinking is still capped by sending the
+	// model's smallest allowed thinkingBudget above; the stream/non-stream
+	// layers enforce the client's max_tokens on the VISIBLE answer.
+	if !isZeroMaxTokens && internalReasoning > 0 {
+		requestedMax += int64(internalAllowance(internalReasoning))
+		if ceiling := outputCeiling(modelMeta, hasMeta); requestedMax > ceiling {
+			requestedMax = ceiling
 		}
 	}
 

@@ -110,7 +110,7 @@ func normalizeEditToolCallKeys(toolName string, argsRaw string) (string, bool) {
 
 func repairEditToolCallCore(toolName string, argsRaw string, sessionID string) (string, bool) {
 	nameLower := strings.ToLower(toolName)
-	if nameLower != "edit" && nameLower != "str_replace_editor" && nameLower != "update" && nameLower != "notebookedit" {
+	if nameLower != "edit" && nameLower != "str_replace_editor" && nameLower != "str_replace_based_edit_tool" && nameLower != "text_editor" && nameLower != "update" && nameLower != "notebookedit" {
 		return argsRaw, false
 	}
 
@@ -189,11 +189,11 @@ func repairEditToolCallCore(toolName string, argsRaw string, sessionID string) (
 	var fileContent string
 	if isWithinSessionCWD(resolvedPath, sessionID) {
 		if fi, err := os.Stat(resolvedPath); err == nil && fi.Size() <= 2*1024*1024 {
-		if data, err := os.ReadFile(resolvedPath); err == nil {
-			fileContent = string(data)
+			if data, err := os.ReadFile(resolvedPath); err == nil {
+				fileContent = string(data)
+			}
 		}
 	}
-}
 	if fileContent == "" {
 		snap, ok := getSessionSnapshot(sessionID, targetPath)
 		if !ok {

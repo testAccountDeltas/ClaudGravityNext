@@ -181,21 +181,47 @@ func extractLeadingSystemMessages(req *claude.Request) ([]claude.Message, bool) 
 // the model can still tell it apart from a genuine user turn.
 func normalizeMidConversationSystemMessages(msgs []claude.Message) ([]claude.Message, bool) {
 	modified := false
-	out := make([]claude.Message, len(msgs))
-	for i, m := range msgs {
+	out := make([]claude.Message, 0, len(msgs))
+	// carry holds an output_config (effort) from a dropped empty system
+	// message until the adjacent turn can take it over.
+	var carry json.RawMessage
+	for _, m := range msgs {
 		if m.Role != claude.Role("system") {
-			out[i] = m
+			if len(carry) > 0 && !hasOutputConfig(m.OutputConfig) {
+				m.OutputConfig = carry
+			}
+			carry = nil
+			out = append(out, m)
 			continue
 		}
 		modified = true
 		text := strings.TrimSpace(extractPlainText(m.Content))
-		out[i] = claude.Message{
+		if text == "" {
+			// An empty system message (content "", [] or [{text:""}]) must
+			// not become a bare "[System Note]: " user turn. Keep only the
+			// per-turn output_config it may carry.
+			if hasOutputConfig(m.OutputConfig) {
+				carry = m.OutputConfig
+			}
+			continue
+		}
+		out = append(out, claude.Message{
 			Role:         claude.RoleUser,
 			Content:      []claude.Block{claude.NewBlock(claude.TextBlock{Type: "text", Text: "[System Note]: " + text})},
 			OutputConfig: m.OutputConfig,
-		}
+		})
+	}
+	// Nothing followed the dropped message: hand its output_config to the
+	// preceding turn instead.
+	if len(carry) > 0 && len(out) > 0 && !hasOutputConfig(out[len(out)-1].OutputConfig) {
+		out[len(out)-1].OutputConfig = carry
 	}
 	return out, modified
+}
+
+func hasOutputConfig(raw json.RawMessage) bool {
+	t := strings.TrimSpace(string(raw))
+	return t != "" && t != "null"
 }
 
 // appendSystemText merges sysText into an existing SystemPrompt, whichever

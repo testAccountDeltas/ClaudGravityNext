@@ -28,6 +28,8 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 	syntheticReasonTools := make(map[string]bool)
 	reverseToolNameMap := make(map[string]string)
 	sentToolNames := make(map[string]string) // original name -> sanitized (Gemini-bound) name
+	sentOriginals := make(map[string]string) // only original tool names -> sanitized
+	editorName, bashName := "", ""
 
 	// A client naming a tool via tool_choice has already said it
 	// specifically needs that exact tool; honor it over the
@@ -51,9 +53,12 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 		// "WebSearch"/"GoogleSearch" never matched it, so inline Gemini
 		// googleSearch grounding never actually activated for the one
 		// real tool name it exists for.
-		normName := strings.ToLower(strings.ReplaceAll(name, "_", ""))
-		if normName == "websearch" || normName == "googlesearch" || strings.HasPrefix(normName, "websearch") || strings.HasPrefix(normName, "googlesearch") {
+		if isServerSearchTool(t, name) {
 			hasWebSearch = true
+			return true
+		}
+		if isUnsupportedServerTool(t, name) {
+			logDroppedServerTool(name, t.Get("type").String())
 			return true
 		}
 		if tenant.StripSearchTools && DropSearchTools[name] && name != forcedToolName && !tn.keepSearchToolsForForcedAny {
@@ -153,19 +158,28 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 		decl, _ = sjson.SetRaw(decl, "parameters", schemaRaw)
 		decls = append(decls, decl)
 		sentToolNames[name] = sanitizedName
+		sentOriginals[name] = sanitizedName
 		sentToolNames[sanitizedName] = sanitizedName
 		if toolType := t.Get("type").String(); toolType != "" {
 			sentToolNames[toolType] = sanitizedName
 		}
-		if name == "str_replace_editor" || strings.HasPrefix(t.Get("type").String(), "text_editor_") || t.Get("type").String() == "text_editor" {
+		if name == "str_replace_editor" || name == "str_replace_based_edit_tool" || strings.HasPrefix(t.Get("type").String(), "text_editor_") || t.Get("type").String() == "text_editor" {
 			sentToolNames["text_editor"] = sanitizedName
 			sentToolNames["str_replace_editor"] = sanitizedName
+			editorName = name
 		}
 		if name == "bash" || strings.HasPrefix(t.Get("type").String(), "bash_") || t.Get("type").String() == "bash" {
 			sentToolNames["bash"] = sanitizedName
+			bashName = name
 		}
 		return true
 	})
+
+	for alias, orig := range repairedNameAliases(sentOriginals, editorName, bashName) {
+		if _, exists := reverseToolNameMap[alias]; !exists {
+			reverseToolNameMap[alias] = orig
+		}
+	}
 
 	if hasWebSearch && len(decls) == 0 {
 		out, _ = sjson.SetRaw(out, "tools.0.googleSearch", "{}")
@@ -197,9 +211,8 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 				out, _ = sjson.Set(out, "toolConfig.functionCallingConfig.mode", "ANY")
 			case "tool":
 				if name := tc.Get("name").String(); name != "" {
-					normName := strings.ToLower(strings.ReplaceAll(name, "_", ""))
-					if normName == "websearch" || normName == "googlesearch" || strings.HasPrefix(normName, "websearch") || strings.HasPrefix(normName, "googlesearch") {
-						if hasWebSearch {
+					if _, isFn := sentToolNames[name]; !isFn && hasWebSearch {
+						{
 							// GAP-R17-06: Gemini strictly forbids functionDeclarations and googleSearch in the same Tool
 							out, _ = sjson.Delete(out, "tools.0.functionDeclarations")
 							out, _ = sjson.Delete(out, "toolConfig")

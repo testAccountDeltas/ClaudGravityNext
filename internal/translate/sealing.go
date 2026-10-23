@@ -14,18 +14,15 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// sealFunctionResponseTurn enforces Gemini's "a turn carrying a
-// functionResponse must contain ONLY functionResponse parts" rule: if
-// parts mixes functionResponse entries with anything else — plain text,
-// images — the text is folded into the first functionResponse's
-// response.user_note. Images are NOT nested under functionResponse.parts
-// — Google's real FunctionResponse message has exactly 3 fields (name,
-// response, id) and no "parts", so that previously silently lost any
-// screenshot/plot a tool returned. Returns the now-pure functionResponse
-// entries, plus any image parts the caller must emit as a separate
-// following turn (role "user", pure inlineData — unambiguously valid
-// Gemini syntax, unlike the removed functionResponse.parts guess).
-func sealFunctionResponseTurn(parts []string) (sealed []string, followUpImages []string) {
+// sealFunctionResponseTurn enforces Gemini's rule that text beside a
+// functionResponse is not allowed: plain text parts are folded into the
+// first functionResponse's response.user_note. Image/document inlineData
+// parts (a tool_result's screenshots/plots) stay in the SAME user turn,
+// after the functionResponse parts — Google's FunctionResponse message has
+// no "parts" field to nest them in, and a fabricated model turn between
+// the result and the images (the previous design) invented assistant
+// speech and a second user turn. Idempotent across repeated merges.
+func sealFunctionResponseTurn(parts []string) []string {
 	var fnResp, other []string
 	for _, p := range parts {
 		if gjson.Get(p, "functionResponse").Exists() {
@@ -35,10 +32,11 @@ func sealFunctionResponseTurn(parts []string) (sealed []string, followUpImages [
 		}
 	}
 	if len(fnResp) == 0 || len(other) == 0 {
-		return parts, nil
+		return parts
 	}
 
 	var note strings.Builder
+	var images []string
 	for _, p := range other {
 		if t := gjson.Get(p, "text"); t.Exists() {
 			if note.Len() > 0 {
@@ -46,7 +44,7 @@ func sealFunctionResponseTurn(parts []string) (sealed []string, followUpImages [
 			}
 			note.WriteString(t.String())
 		} else if gjson.Get(p, "inlineData").Exists() {
-			followUpImages = append(followUpImages, p)
+			images = append(images, p)
 		}
 	}
 
@@ -65,5 +63,5 @@ func sealFunctionResponseTurn(parts []string) (sealed []string, followUpImages [
 		target, _ = sjson.Set(target, "functionResponse.response.user_note", newNote)
 	}
 	fnResp[0] = target
-	return fnResp, followUpImages
+	return append(fnResp, images...)
 }

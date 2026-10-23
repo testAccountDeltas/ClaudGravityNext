@@ -180,6 +180,7 @@ func walkArrayItemProperties(props gjson.Result, prefix string, fields map[strin
 // fields back to their declared integer/number/boolean type before the
 // args are handed to the client as a tool_use block.
 func CoerceNumericEnumArgs(sessionID, toolName, argsRaw string) string {
+	argsRaw = ConformToolArgs(sessionID, toolName, argsRaw)
 	fields, _ := numericEnumFields.Get(numericEnumKey(sessionID, toolName))
 	for field, origType := range fields {
 		if field == "__scalar_arg__" {

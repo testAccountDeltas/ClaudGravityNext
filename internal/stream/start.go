@@ -5,6 +5,8 @@ package stream
 
 import (
 	"encoding/json"
+
+	"claudgravity/internal/cacheusage"
 )
 
 // EnsureMessageStart sends message_start exactly once, estimating the
@@ -39,14 +41,9 @@ func (f *FSM) EnsureMessageStart() error {
 	// NOT mutually exclusive (a breakpoint from a prior turn can be read
 	// while a new breakpoint further into this turn's own fresh content
 	// is also written), so this doesn't gate on cachedEstimate==0.
-	cacheCreationEstimate := int64(0)
-	if f.cachePrefixFrac > 0 && uncachedEstimate > cacheCreationThreshold(f.model) {
-		cacheCreationEstimate = int64(float64(uncachedEstimate) * f.cachePrefixFrac)
-		uncachedEstimate -= cacheCreationEstimate
-		if uncachedEstimate < 0 {
-			uncachedEstimate = 0
-		}
-	}
+	cc5m, cc1h := cacheusage.Split(f.model, uncachedEstimate, cachedEstimate, f.cachePrefixFrac, f.cacheFrac1h)
+	cacheCreationEstimate := cc5m + cc1h
+	uncachedEstimate -= cacheCreationEstimate
 
 	startPayload := map[string]interface{}{
 		"type": "message_start",
@@ -62,6 +59,7 @@ func (f *FSM) EnsureMessageStart() error {
 				"input_tokens":                uncachedEstimate,
 				"output_tokens":               1,
 				"cache_creation_input_tokens": cacheCreationEstimate,
+				"cache_creation":              cacheusage.Object(cc5m, cc1h),
 				"cache_read_input_tokens":     cachedEstimate,
 			},
 		},

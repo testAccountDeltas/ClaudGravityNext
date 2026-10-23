@@ -9,6 +9,13 @@ package tiering
 
 import "strings"
 
+// cheapThinkingBudget is the ceiling for auxiliary / lightweight-subagent
+// requests even when the client explicitly enabled thinking.
+const cheapThinkingBudget = 2048
+
+// midThinkingBudget caps thinking for compaction/workflow requests.
+const midThinkingBudget = 8192
+
 // ResolveTieringAndEffort handles dynamic tiering and effort mapping:
 // 1. Prioritizes ultra-fast gemini-3.8-flash-tiered with prompt caching for claude-* models.
 // 2. Maps *-tiered models based on output_config.effort or auxiliary requests.
@@ -18,8 +25,17 @@ import "strings"
 //   - high -> 16384 (gemini-3.8-flash-high)
 //   - xhigh / max / ultracode -> -1 (gemini-3.8-flash-tiered with Native Google ModeAuto)
 //   - auxiliary -> 2048 (gemini-3.8-flash-low, eliminates 20s stalls on metadata)
+//
+// The levels above only apply when the client ENABLED thinking (thinking.type
+// enabled/adaptive); with no thinking field or type "disabled" the returned
+// budget is 0 and the effort only influences model selection.
 func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass string, agentKey string) (string, int) {
 	model, _ := claudeReqJSON["model"].(string)
+	model = NormalizeModelID(model)
+	// compaction / workflow requests are summarisation-style work: a
+	// mid-weight tier (never the heavy ModeAuto one) with thinking governed
+	// by the usual enabled/disabled rules and capped at midThinkingBudget.
+	midClass := reqClass == "compaction" || reqClass == "workflow"
 
 	// An audit caught that this function only ever checked reqClass ==
 	// "auxiliary" for the cheap/fast tier — reqClass == "subagent" (the
@@ -45,27 +61,23 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 		isLightweightSubagent = true
 	}
 
-	// 1. Explicit native models preservation
+	// 1. Explicit native models preservation, then family mapping by
+	// substring (so "us.anthropic.claude-opus-4-5-20250929-v1:0", "OPUS",
+	// "claude-sonnet-4-5[1m]" all behave like their bare alias).
 	if model == "claude-sonnet-4-6" || model == "claude-opus-4-6-thinking" || model == "gpt-oss-120b-medium" {
 		// Native 3P models supported by CloudCode - keep if explicitly requested
-	} else if strings.HasPrefix(model, "claude-opus") || strings.HasPrefix(model, "claude-3-opus") ||
-		strings.HasPrefix(model, "claude-fable") || strings.HasPrefix(model, "claude-mythos") ||
-		model == "opus" || model == "fable" || model == "mythos" {
-		// Canonical mapping matching Python relay-proxy: Opus maps to gemini-3.8-flash-tiered
-		// An audit caught that Claude Code's Agent/Task tool schema allows
-		// the bare aliases "sonnet"/"opus"/"haiku"/"fable" (no "claude-"
-		// prefix) for a subagent's model field — none of the HasPrefix
-		// checks here matched those, so every subagent requesting the
-		// CHEAPEST tier ("haiku") silently fell through to the
-		// unmapped-model fallback below and got escalated to the
-		// heaviest ModeAuto/unlimited-thinking tier instead, burning
-		// 30-60s of extra TTFT and quota on what should've been a quick,
-		// cheap subagent call. Handle the bare aliases explicitly.
-		model = "gemini-3.8-flash-tiered"
-	} else if strings.HasPrefix(model, "claude-sonnet") || strings.HasPrefix(model, "claude-3-5-sonnet") || strings.HasPrefix(model, "claude-3-7-sonnet") || strings.HasPrefix(model, "claude-3-sonnet") || model == "sonnet" {
-		model = "gemini-3.8-flash-medium"
-	} else if strings.HasPrefix(model, "claude-haiku") || strings.HasPrefix(model, "claude-3-5-haiku") || strings.HasPrefix(model, "claude-3-haiku") || model == "haiku" {
-		model = "gemini-2.5-flash"
+	} else if fam := ModelFamily(model); fam != "" {
+		switch fam {
+		case "sonnet":
+			model = "gemini-3.8-flash-medium"
+		case "haiku":
+			model = "gemini-2.5-flash"
+		default:
+			// Opus/Fable/Mythos: flagship tiered class (the bare aliases
+			// "sonnet"/"opus"/"haiku"/"fable" that Claude Code's Agent tool
+			// sends are covered by the same substring match).
+			model = "gemini-3.8-flash-tiered"
+		}
 	} else if model != "" && !strings.HasPrefix(model, "gemini-") {
 		// Fallback for unmapped or legacy models (claude-2.1, claude-instant, etc.)
 		model = "gemini-3.8-flash-tiered"
@@ -122,6 +134,9 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 		if reqClass == "auxiliary" || isLightweightSubagent {
 			model = base + "-low"
 			budget = 2048
+		} else if midClass && effort != "low" && effort != "none" && effort != "off" && effort != "disabled" {
+			model = base + "-medium"
+			budget = midThinkingBudget
 		} else {
 			switch effort {
 			case "low":
@@ -176,6 +191,9 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 		if reqClass == "auxiliary" || isLightweightSubagent {
 			model = base + "-low"
 			budget = 2048
+		} else if midClass && effort != "low" && effort != "none" && effort != "off" && effort != "disabled" {
+			model = base + "-medium"
+			budget = midThinkingBudget
 		} else {
 			switch effort {
 			case "low":
@@ -256,6 +274,17 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 
 	// Standard Anthropic "thinking" object: explicit client request takes precedence
 	// over output_config.effort (e.g. environment variable CLAUDE_CODE_EFFORT_LEVEL).
+	//
+	// Anthropic semantics: thinking happens ONLY when the client enabled it
+	// (type enabled/adaptive/between_tools, or a legacy bare budget_tokens>0).
+	// No thinking field / type "disabled" means no thinking, so the
+	// effort-derived budget computed above is used for MODEL selection only
+	// and the budget itself collapses to 0 (see applyGenerationConfig for the
+	// models whose thinking cannot be fully disabled). Previously the
+	// effort/default budget (8192 or ModeAuto) leaked through, so a bare
+	// "Say hi" with max_tokens=32 produced thousands of thinking tokens.
+	thinkingOn := false
+	cheap := reqClass == "auxiliary" || isLightweightSubagent
 	if th, ok := claudeReqJSON["thinking"].(map[string]interface{}); ok {
 		var btVal float64
 		hasBT := false
@@ -274,6 +303,7 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 		case "disabled":
 			budget = 0
 		case "enabled":
+			thinkingOn = true
 			if hasBT {
 				if btVal == 0 {
 					budget = 0
@@ -281,22 +311,29 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 					budget = int(btVal)
 				}
 			}
-		case "adaptive":
-			// ModeAuto is the closest Gemini-side equivalent
-			// to "let the model decide its own thinking depth".
-			budget = -1
-		case "between_tools":
-			// GAP-TH-09: fell into no case at all before, leaving
-			// budget at whatever generic default was already
-			// computed — same ModeAuto treatment as "adaptive", since
-			// Gemini has no distinct "reason between tool calls"
-			// knob of its own.
-			budget = -1
+		case "adaptive", "between_tools":
+			// ModeAuto is the closest Gemini-side equivalent to "let the
+			// model decide its own thinking depth" (and, GAP-TH-09, to
+			// "reason between tool calls"), except for the cheap/fast
+			// classes, which must never get unbounded thinking: they keep
+			// the small budget the tier branch above chose.
+			thinkingOn = true
+			if !cheap && !(model == "gemini-2.5-flash" && budget == 0) {
+				budget = -1
+			}
 		default:
-			if hasBT && btVal == 0 {
-				budget = 0
+			if hasBT && btVal > 0 {
+				thinkingOn = true
+				budget = int(btVal)
 			}
 		}
+	}
+	if !thinkingOn {
+		budget = 0
+	} else if cheap && (budget < 0 || budget > cheapThinkingBudget) {
+		budget = cheapThinkingBudget
+	} else if midClass && (budget < 0 || budget > midThinkingBudget) {
+		budget = midThinkingBudget
 	}
 
 	claudeReqJSON["model"] = model

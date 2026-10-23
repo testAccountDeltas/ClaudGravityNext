@@ -96,6 +96,15 @@ func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigra
 					partsJSON = append(partsJSON, convertThinkingBlock(p, role, isLastAssistantMsg, content, isAntigravity, sessionID)...)
 				case "redacted_thinking":
 					partsJSON = append(partsJSON, convertRedactedThinkingBlock(role, isLastAssistantMsg, isAntigravity)...)
+				default:
+					// search_result, mcp_*, code-execution results,
+					// compaction, ... : faithful labelled text instead of
+					// silently dropping the block (see blocktext.go).
+					if ptype != "" {
+						if txt := blockToText(p); txt != "" {
+							partsJSON = append(partsJSON, textPart(txt))
+						}
+					}
 				}
 				return true
 			})
@@ -115,8 +124,7 @@ func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigra
 			}
 			partsJSON = append(partsJSON, part)
 		}
-		var followUpImages []string
-		partsJSON, followUpImages = sealFunctionResponseTurn(partsJSON)
+		partsJSON = sealFunctionResponseTurn(partsJSON)
 
 		if geminiRole == lastRole && contentIdx > 0 {
 			targetIdx := contentIdx - 1
@@ -133,9 +141,7 @@ func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigra
 				return true
 			})
 			combined = append(combined, partsJSON...)
-			var mergedFollowUp []string
-			combined, mergedFollowUp = sealFunctionResponseTurn(combined)
-			followUpImages = append(followUpImages, mergedFollowUp...)
+			combined = sealFunctionResponseTurn(combined)
 			if geminiRole == "model" {
 				combined = reorderThoughtPartsFirst(combined)
 			}
@@ -150,39 +156,6 @@ func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigra
 				out, _ = sjson.SetRaw(out, fmt.Sprintf("contents.%d.parts.-1", contentIdx), pjson)
 			}
 			lastRole = geminiRole
-			contentIdx++
-		}
-
-		if len(followUpImages) > 0 {
-			// The turn right before this one (the functionResponse turn
-			// these images came out of) is ALSO role "user" — appending
-			// this image turn as role "user" too would put two
-			// consecutive "user" entries in contents[], which Gemini's
-			// strict user/model alternation rejects outright. A one-line
-			// synthetic model turn in between restores alternation.
-			out, _ = sjson.Set(out, fmt.Sprintf("contents.%d.role", contentIdx), "model")
-			// GAP-TL-08: this synthetic "model" turn exists only to
-			// legally separate inlineData from the preceding
-			// functionResponse turn — but a plain text-only "model" part
-			// with no thoughtSignature is exactly the shape Gemini 2.5's
-			// thought validator rejects. Attach the same
-			// skip_thought_signature_validator placeholder
-			// internal/translate/thinking.go already uses for other
-			// signature-less synthetic turns.
-			ackPart := `{"text":"Tool output received. Processing visual data."}`
-			if isAntigravity {
-				ackPart = `{"text":"Tool output received. Processing visual data.","thoughtSignature":"skip_thought_signature_validator"}`
-			}
-			out, _ = sjson.SetRaw(out, fmt.Sprintf("contents.%d.parts.-1", contentIdx), ackPart)
-			contentIdx++
-
-			out, _ = sjson.Set(out, fmt.Sprintf("contents.%d.role", contentIdx), "user")
-			notePart := `{"text":"Visual output from the previous tool call:"}`
-			out, _ = sjson.SetRaw(out, fmt.Sprintf("contents.%d.parts.-1", contentIdx), notePart)
-			for _, pjson := range followUpImages {
-				out, _ = sjson.SetRaw(out, fmt.Sprintf("contents.%d.parts.-1", contentIdx), pjson)
-			}
-			lastRole = "user"
 			contentIdx++
 		}
 

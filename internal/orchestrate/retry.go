@@ -14,7 +14,9 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
+	"claudgravity/internal/accounts"
 	"claudgravity/internal/ephemeral"
+	"claudgravity/internal/reqctx"
 )
 
 const (
@@ -109,4 +111,29 @@ func setSessionBump(sessionID string, bump int) {
 		return
 	}
 	sessionBumps.Set(sessionID, bump)
+}
+
+// maxFailoverTries caps the total upstream tries when failures are 429-class.
+const maxFailoverTries = 8
+
+// failoverCeiling is max(maxAttempts, min(poolSize, maxFailoverTries)): how
+// many distinct accounts a request may try when every failure is a quota /
+// rate-limit rejection. Direct API-key requests have no pool to rotate.
+func failoverCeiling(p *reqctx.Params) int {
+	if !p.IsAntigravity {
+		return maxAttempts
+	}
+	n := 0
+	for _, a := range accounts.Manager().GetAccounts() {
+		if !a.Disabled {
+			n++
+		}
+	}
+	if n > maxFailoverTries {
+		n = maxFailoverTries
+	}
+	if n < maxAttempts {
+		n = maxAttempts
+	}
+	return n
 }

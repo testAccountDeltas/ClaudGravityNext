@@ -12,7 +12,6 @@ package toolargs
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 )
 
@@ -26,19 +25,21 @@ import (
 // params) is a clearer, more honest failure than a plausible-looking but
 // incorrect guess.
 var primaryStringParam = map[string]string{
-	"bash":               "command",
-	"powershell":         "command",
-	"pwsh":               "command",
-	"read":               "file_path",
-	"edit":               "file_path",
-	"notebookedit":       "notebook_path",
-	"grep":               "pattern",
-	"glob":               "pattern",
-	"str_replace_editor": "path",
-	"web_search":         "query",
-	"websearch":          "query",
-	"web_fetch":          "url",
-	"webfetch":           "url",
+	"bash":                        "command",
+	"powershell":                  "command",
+	"pwsh":                        "command",
+	"read":                        "file_path",
+	"edit":                        "file_path",
+	"notebookedit":                "notebook_path",
+	"grep":                        "pattern",
+	"glob":                        "pattern",
+	"str_replace_editor":          "path",
+	"str_replace_based_edit_tool": "path",
+	"text_editor":                 "path",
+	"web_search":                  "query",
+	"websearch":                   "query",
+	"web_fetch":                   "url",
+	"webfetch":                    "url",
 }
 
 func lookupPrimaryParam(name string) (string, bool) {
@@ -185,10 +186,10 @@ func NormalizeToArgsObject(name, argsRaw string) string {
 		}
 	}
 
-	prunedNulls := pruneNulls(m)
-	coercedBooleans := coerceBooleanStrings(m)
-	coercedNumbers := coerceNumericStrings(m)
-	if !wasDoubleEncoded && !coercedNumbers && !coercedBooleans && !prunedNulls {
+	// Type coercion and null handling are schema-driven (ConformToSchema,
+	// applied on the response path via schema.CoerceNumericEnumArgs); this
+	// function only guarantees an object.
+	if !wasDoubleEncoded {
 		return argsRaw // already a plain object, avoid an unnecessary re-marshal
 	}
 	b, err := json.Marshal(v)
@@ -196,140 +197,4 @@ func NormalizeToArgsObject(name, argsRaw string) string {
 		return "{}"
 	}
 	return string(b)
-}
-
-func pruneNulls(v interface{}) bool {
-	changed := false
-	switch val := v.(type) {
-	case map[string]interface{}:
-		for k, item := range val {
-			if item == nil {
-				delete(val, k)
-				changed = true
-			} else if pruneNulls(item) {
-				changed = true
-			}
-		}
-	case []interface{}:
-		for _, item := range val {
-			if pruneNulls(item) {
-				changed = true
-			}
-		}
-	}
-	return changed
-}
-
-func isExemptStringField(key string) bool {
-	k := strings.ToLower(key)
-	if strings.HasSuffix(k, "id") || strings.HasSuffix(k, "uuid") ||
-		strings.HasSuffix(k, "key") || strings.HasSuffix(k, "version") ||
-		strings.HasSuffix(k, "sha") || strings.HasSuffix(k, "token") ||
-		strings.HasSuffix(k, "hash") || strings.HasSuffix(k, "status") ||
-		strings.HasSuffix(k, "model") || strings.HasSuffix(k, "tag") ||
-		strings.HasSuffix(k, "branch") || strings.HasSuffix(k, "ref") ||
-		strings.HasSuffix(k, "mode") || strings.HasSuffix(k, "type") ||
-		strings.HasSuffix(k, "name") {
-		return true
-	}
-	switch k {
-	case "file_path", "path", "pattern", "command", "code", "query", "text", "content",
-		"old_string", "new_string", "old_str", "new_str", "url", "uri", "id", "name",
-		"key", "prompt", "message", "filename", "filepath", "source", "dest", "destination",
-		"taskid", "task_id", "agentid", "agent_id", "sessionid", "session_id", "shell_id",
-		"status", "hash", "model", "branch", "tag", "ref", "commit", "title", "description",
-		"summary", "body", "comment", "value", "mode", "slug", "author", "header", "headers",
-		"env", "environment", "zip", "phone", "postal_code", "label", "question", "preview",
-		"subject", "activeform", "active_form", "skill", "script", "scriptpath", "script_path",
-		"target", "port", "color", "hex", "filter", "output", "input", "context", "note", "notes",
-		"reason", "explanation", "revision", "rev", "category", "short_summary", "failure_scenario",
-		"details", "area", "ts", "thread_ts", "channel", "repo", "base", "head", "sql", "phone_number":
-		return true
-	}
-	return false
-}
-
-func isStringDictContainer(key string) bool {
-	k := strings.ToLower(key)
-	return k == "env" || k == "environment" || k == "headers" || k == "metadata" || k == "params" || k == "annotations" || k == "answers"
-}
-
-func coerceNumericStrings(v interface{}) bool {
-	return coerceNumericStringsWithContext(v, "")
-}
-
-func coerceNumericStringsWithContext(v interface{}, parentKey string) bool {
-	changed := false
-	switch val := v.(type) {
-	case map[string]interface{}:
-		if isStringDictContainer(parentKey) {
-			return false
-		}
-		for k, item := range val {
-			if s, isStr := item.(string); isStr {
-				if !isExemptStringField(k) {
-					sTrim := strings.TrimSpace(s)
-					if len(sTrim) > 0 && !(len(sTrim) > 1 && sTrim[0] == '0' && sTrim[1] >= '0' && sTrim[1] <= '9') {
-						if n, err := strconv.ParseInt(sTrim, 10, 64); err == nil && strconv.FormatInt(n, 10) == sTrim {
-							val[k] = n
-							changed = true
-						} else if f, err := strconv.ParseFloat(sTrim, 64); err == nil && !strings.ContainsAny(sTrim, "eE") && strings.Contains(sTrim, ".") {
-							val[k] = f
-							changed = true
-						}
-					}
-				}
-			} else if coerceNumericStringsWithContext(item, k) {
-				changed = true
-			}
-		}
-	case []interface{}:
-		for _, item := range val {
-			if coerceNumericStringsWithContext(item, parentKey) {
-				changed = true
-			}
-		}
-	}
-	return changed
-}
-
-func isBooleanField(key string) bool {
-	k := strings.ToLower(key)
-	switch k {
-	case "replace_all", "replaceall", "dangerouslydisablesandbox", "dangerously_disable_sandbox",
-		"run_in_background", "runinbackground", "multiselect", "multi_select", "allow_large",
-		"allowlarge", "stop", "noop", "force", "pin", "unpin", "is_error", "iserror":
-		return true
-	}
-	return false
-}
-
-func coerceBooleanStrings(v interface{}) bool {
-	changed := false
-	switch val := v.(type) {
-	case map[string]interface{}:
-		for k, item := range val {
-			if s, isStr := item.(string); isStr {
-				if isBooleanField(k) {
-					sLower := strings.TrimSpace(strings.ToLower(s))
-					if sLower == "true" || sLower == "1" {
-						val[k] = true
-						changed = true
-					} else if sLower == "false" || sLower == "0" {
-						val[k] = false
-						changed = true
-					}
-				}
-			} else if coerceBooleanStrings(item) {
-				changed = true
-			}
-		}
-	case []interface{}:
-		for _, item := range val {
-			if coerceBooleanStrings(item) {
-				changed = true
-			}
-		}
-	}
-	return changed
 }

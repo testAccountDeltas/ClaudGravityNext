@@ -52,6 +52,10 @@ type Params struct {
 	// enforcement site).
 	DisableParallelToolUse bool
 
+	// MaxTokens is the client's max_tokens (0 = unknown / unlimited). It
+	// caps VISIBLE output only; see internal/stream/visiblecap.go.
+	MaxTokens int64
+
 	StopSequences        []string
 	PrefillText          string
 	SyntheticReasonTools map[string]bool

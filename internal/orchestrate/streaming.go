@@ -20,8 +20,9 @@ import (
 
 	"claudgravity/internal/accounts"
 	"claudgravity/internal/anthropicerr"
+	"claudgravity/internal/cacheusage"
 	"claudgravity/internal/langdetect"
-	"claudgravity/internal/loopguard"
+	"claudgravity/internal/logx"
 	"claudgravity/internal/protocol/claude"
 	"claudgravity/internal/ratelimit"
 	"claudgravity/internal/reqctx"
@@ -29,7 +30,6 @@ import (
 	"claudgravity/internal/speccapture"
 	"claudgravity/internal/stream"
 	"claudgravity/internal/tokens"
-	"claudgravity/internal/toolkind"
 )
 
 // runStreamingAttempt performs ONE upstream streaming call for p/st
@@ -89,23 +89,31 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 	}()
 
 	var wMu sync.Mutex
-	var sw *stream.SafeSSEWriter
 	earlyHeadersSent := false
 
+	// Deferred commit: the HTTP 200 + SSE headers are written lazily, by sw
+	// itself, right before its FIRST byte — which is either a keepalive
+	// ping (upstream silent for a while) or the first visible content
+	// block. Everything before that (message_start, thinking) is held in sw
+	// and discarded if the turn turns out bad, so an upstream 429/503, an
+	// in-band error, an empty turn, an abnormal finishReason or a truncated
+	// stream can still fail over to another account with the client's
+	// response untouched. A response already committed by an earlier
+	// attempt's ping is reused (tracker), never re-headed.
+	tw, tracker := trackCommit(w)
 	commitHeaders := func() {
-		ratelimit.ApplyHeaders(w.Header(), st.ActiveAccount, st.ResolvedModelName)
-		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.WriteHeader(http.StatusOK)
+		if tracker.Committed() {
+			return
+		}
+		ratelimit.ApplyHeaders(tw.Header(), st.ActiveAccount, st.ResolvedModelName)
+		tw.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		tw.Header().Set("Cache-Control", "no-cache")
+		tw.WriteHeader(http.StatusOK)
 		flusher.Flush()
-		sw = stream.NewSafeSSEWriter(p.RID, w, flusher, speccapture.Global())
-		// GAP-S1: the raw w.WriteHeader(200) just above already committed
-		// headers on the real socket — sw itself doesn't know that yet
-		// (a brand-new writer always starts headersSent=false), so a
-		// TerminateWithError called before sw's own first EmitEvent/ping
-		// would otherwise wrongly report "headers not sent".
-		sw.MarkHeadersAlreadySent()
 	}
+	sw := stream.NewSafeSSEWriter(p.RID, tw, flusher, speccapture.Global())
+	sw.SetCommitHook(commitHeaders)
+	sw.HoldEvents()
 
 	t0 := st.StartedAt
 	logFailure := func(wasPanicked bool, errStr string, httpStatus int) {
@@ -142,15 +150,15 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 			if res.resp != nil && res.resp.Body != nil {
 				_ = res.resp.Body.Close()
 			}
-			if errors.Is(res.err, context.Canceled) || errors.Is(baseCtx.Err(), context.Canceled) {
+			if clientGone(baseCtx) {
 				return false, 499, res.err
 			}
-			return false, http.StatusBadGateway, res.err
+			return false, upstreamErrStatus(res.err), res.err
 		}
 		upResp = res.resp
 
 	case <-wd.ctx.Done():
-		if errors.Is(baseCtx.Err(), context.Canceled) {
+		if clientGone(baseCtx) {
 			return false, 499, baseCtx.Err()
 		}
 		return false, http.StatusGatewayTimeout, wd.ctx.Err()
@@ -170,10 +178,10 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 						if res.resp != nil && res.resp.Body != nil {
 							_ = res.resp.Body.Close()
 						}
-						if errors.Is(res.err, context.Canceled) || errors.Is(baseCtx.Err(), context.Canceled) {
+						if clientGone(baseCtx) {
 							return false, 499, res.err
 						}
-						return false, http.StatusBadGateway, res.err
+						return false, upstreamErrStatus(res.err), res.err
 					}
 					upResp = res.resp
 					break waitNoEarlyHeaders
@@ -183,7 +191,7 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 
 				case <-wd.ctx.Done():
 					status := http.StatusGatewayTimeout
-					if errors.Is(baseCtx.Err(), context.Canceled) {
+					if clientGone(baseCtx) {
 						status = 499
 					}
 					logFailure(false, "Upstream context timeout before response", status)
@@ -192,7 +200,7 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 			}
 		} else {
 			wMu.Lock()
-			commitHeaders()
+			sw.Commit()
 			earlyHeadersSent = true
 			_ = sw.EmitEvent("ping", `{"type":"ping"}`)
 			wMu.Unlock()
@@ -249,12 +257,6 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 		return true, upResp.StatusCode, fmt.Errorf("HTTP %d: %s", upResp.StatusCode, string(respBytes))
 	}
 
-	wMu.Lock()
-	if !earlyHeadersSent {
-		commitHeaders()
-	}
-	wMu.Unlock()
-
 	ttft := time.Since(t0)
 	claudeBodyBytes := p.RawClaudeBody
 	var req claude.Request
@@ -270,10 +272,9 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 		respModel = st.ResolvedModelName
 	}
 	hasPrior := hasAssistantTurns(claudeBodyBytes)
-	cachePrefixFrac := 0.0
-	if hasCacheControlBreakpoint(claudeBodyBytes) {
-		cachePrefixFrac = cacheBreakpointPrefixFraction(claudeBodyBytes)
-	}
+	cacheInfo := cacheusage.Analyze(claudeBodyBytes)
+	cachePrefixFrac := cacheInfo.PrefixFrac
+	st.CacheFrac1h = cacheInfo.Frac1h
 	st.EstInputTokens = estInputTokens
 	st.CachePrefixFrac = cachePrefixFrac
 
@@ -283,11 +284,32 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 	fsmParams.HasPriorTurns = hasPrior
 	fsmParams.DisableParallelToolUse = wantsSingleToolUse(claudeBodyBytes)
 	fsmParams.StopSequences = req.StopSequences
+	fsmParams.MaxTokens = req.MaxTokens
 	fsm := stream.NewFSM(sw, p.RID, &fsmParams, st)
 	fsm.SetChunkRecorder(speccapture.Global())
 
 	err = stream.StreamGeminiToClaude(fsm, upResp.Body, wd.Touch)
-	if err != nil {
+	turnErr := asTurnError(err)
+	if err != nil && !sw.IsReleased() {
+		// Nothing of this turn reached the client (events still held):
+		// drop them and let the caller retry on another account/host.
+		sw.DiscardHeld()
+		status := http.StatusBadGateway
+		switch {
+		case turnErr != nil:
+			status = turnErr.Status
+		case clientGone(baseCtx):
+			status = 499
+		case errors.Is(err, context.Canceled):
+			status = http.StatusGatewayTimeout // idle watchdog, not a client disconnect
+		}
+		fs := fsm.Stats()
+		logx.LogGateway("[#%d] << turn failed before any content (retryable): finishReason=%q status=%d err=%v usage in=%d out=%d cache_read=%d",
+			p.RID, fs.FinishReason, status, err, fs.InputTokens, fs.OutputTokens, fs.CacheTokens)
+		logFailure(false, err.Error(), status)
+		return false, status, err
+	}
+	if err != nil && turnErr == nil {
 		wMu.Lock()
 		fsm.FinishWithError(err)
 		flusher.Flush()
@@ -296,39 +318,9 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 	totalDur := time.Since(t0)
 
 	stats := fsm.Stats()
-	readCount := 0
-	madeProgress := false
-	for _, sig := range stats.ToolCallSignatures {
-		name, isReadEquiv, isWriteEquiv := loopguard.ReadLoopEquivalentToolName(sig)
-		if isReadEquiv {
-			readCount++
-		} else if toolkind.IsModifyingToolName(name) || isWriteEquiv {
-			madeProgress = true
-		}
-	}
-	realProgress := madeProgress
-	if readCount == 0 && !madeProgress {
-		// GAP-TH-11: a turn with a long chain of reasoning (e.g. 10,000
-		// chars of thinking) but a short visible answer was counted as
-		// "no progress" toward the read-loop counter, judged on
-		// TextChars alone — substantial reasoning is real work, not a
-		// stalled read-loop, even when the visible answer is short.
-		madeProgress = stats.TextChars > 200 || stats.ThinkingChars > 2000
-	}
-	loopKey := p.AgentKey + "|" + p.SessionID + "|" + p.InstanceID
-	isPlanModeNow := loopguard.IsPlanModeRequest(claudeBodyBytes)
-	readWindowSize, _ := loopguard.ReadLoopLimits(p.AgentKey, loopguard.HasModifyingToolsInRequest(claudeBodyBytes))
-	loopguard.Global().RecordReadTurnWithRealProgress(loopKey, readCount, madeProgress, realProgress, readWindowSize, isPlanModeNow)
-
-	hasIgnoreTag := loopguard.HasIgnoreLoopTag(stats.LastText) || loopguard.HasIgnoreLoopTag(stats.LastThinking) || loopguard.HasIgnoreLoopTag(string(claudeBodyBytes))
-	// Status-check polls repeated while waiting on async work are exempt from oscillation detection.
-	oscillationCalls := make([]string, 0, len(stats.ToolCallSignatures))
-	for _, sig := range stats.ToolCallSignatures {
-		if !loopguard.IsStatusCheckToolCall(sig) {
-			oscillationCalls = append(oscillationCalls, sig)
-		}
-	}
-	loopguard.Global().RecordToolCalls(loopKey, oscillationCalls, hasIgnoreTag)
+	logx.LogGateway("[#%d] << finishReason=%q stop_reason=%s usage in=%d out=%d cache_read=%d tools=%v err=%v",
+		p.RID, stats.FinishReason, stats.StopReason, stats.InputTokens, stats.OutputTokens, stats.CacheTokens, stats.ToolNames, err)
+	recordStreamLoopGuard(p, stats, claudeBodyBytes)
 
 	var hitRate float64
 	if stats.InputTokens > 0 {
@@ -340,8 +332,15 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 	if err != nil {
 		errStr = err.Error()
 		switch {
-		case errors.Is(err, context.Canceled) || errors.Is(baseCtx.Err(), context.Canceled) || strings.Contains(errStr, "context canceled"):
+		case turnErr != nil:
+			// A bad turn that already had content on the wire (reported to
+			// the client as an SSE error event by the FSM).
+			reportedStatus = turnErr.Status
+		case clientGone(baseCtx):
 			reportedStatus = 499
+		case errors.Is(err, context.Canceled) || strings.Contains(errStr, "context canceled"):
+			// Idle watchdog cancelled its own derived ctx, not the client.
+			reportedStatus = http.StatusGatewayTimeout
 		case strings.Contains(errStr, "RESOURCE_EXHAUSTED") || strings.Contains(errStr, "rate_limit_error"):
 			reportedStatus = http.StatusTooManyRequests
 		case strings.Contains(errStr, "UNAVAILABLE") || strings.Contains(errStr, "overloaded_error"):

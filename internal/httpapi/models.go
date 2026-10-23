@@ -169,17 +169,25 @@ func handleModels(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http.R
 		WriteAnthropicError(w, http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
 		return
 	}
-	models := allModels()
-	resp := map[string]interface{}{
-		"data": models,
-		// This gateway's whole catalog fits in one page — has_more is
-		// always false, but the field itself is still expected by the
-		// official SDKs' pagination handling.
-		"has_more": false,
+	q := r.URL.Query()
+	page, hasMore, errMsg := paginateModels(sortedModels(), q.Get("limit"), q.Get("after_id"), q.Get("before_id"))
+	if errMsg != "" {
+		WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error", errMsg)
+		return
 	}
-	if len(models) > 0 {
-		resp["first_id"] = models[0]["id"]
-		resp["last_id"] = models[len(models)-1]["id"]
+	data := make([]map[string]interface{}, len(page))
+	for i, m := range page {
+		data[i] = decorateModel(m)
+	}
+	resp := map[string]interface{}{
+		"data":     data,
+		"has_more": hasMore,
+		"first_id": nil,
+		"last_id":  nil,
+	}
+	if len(page) > 0 {
+		resp["first_id"] = page[0]["id"]
+		resp["last_id"] = page[len(page)-1]["id"]
 	}
 	b, _ := json.Marshal(resp)
 	w.Header().Set("Content-Type", "application/json")
@@ -197,13 +205,11 @@ func handleModelByID(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *htt
 		return
 	}
 	id := r.PathValue("id")
-	for _, m := range allModels() {
-		if m["id"] == id {
-			b, _ := json.Marshal(m)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write(b)
-			return
-		}
+	if m, ok := lookupModel(id); ok {
+		b, _ := json.Marshal(m)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(b)
+		return
 	}
 	WriteAnthropicError(w, http.StatusNotFound, "not_found_error", fmt.Sprintf("model: %s", id))
 }

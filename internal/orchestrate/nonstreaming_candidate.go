@@ -15,10 +15,12 @@ import (
 
 	"claudgravity/internal/editrepair"
 	"claudgravity/internal/langdetect"
+	"claudgravity/internal/logx"
 	"claudgravity/internal/loopguard"
 	"claudgravity/internal/protocol/claude"
 	"claudgravity/internal/reqctx"
 	"claudgravity/internal/schema"
+	"claudgravity/internal/stream"
 	"claudgravity/internal/toolargs"
 	"claudgravity/internal/toolcallid"
 	"claudgravity/internal/toolsig"
@@ -111,6 +113,7 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 			case part.Get("functionCall").Exists():
 				fc := part.Get("functionCall")
 				if len(cr.toolsCalled) > 0 && wantsSingleToolUse(claudeBodyBytes) {
+					logx.LogGateway("[Tools] disable_parallel_tool_use: dropping extra tool call %q (only the first call of a turn is kept)", fc.Get("name").String())
 					continue
 				}
 				fname := fc.Get("name").String()
@@ -182,7 +185,9 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 		}
 	}
 
-	if gm := cand.Get("groundingMetadata"); claudeResp["stop_reason"] != "tool_use" && gm.Exists() {
+	// No sources footer after a refusal or a max_tokens cut-off (mirrors the
+	// streaming path): it would append prose to a truncated/blocked answer.
+	if gm := cand.Get("groundingMetadata"); claudeResp["stop_reason"] != "tool_use" && gm.Exists() && groundingFooterAllowed(cand) {
 		if chunks := gm.Get("groundingChunks"); chunks.IsArray() && len(chunks.Array()) > 0 {
 			var sb strings.Builder
 			if langdetect.IsRussianConversation(req.Messages) {
@@ -208,6 +213,16 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 	}
 
 	return cr
+}
+
+// groundingFooterAllowed reports whether the finish reason permits the
+// sources footer: never after a refusal or a max_tokens cut-off.
+func groundingFooterAllowed(cand gjson.Result) bool {
+	switch stream.ClassifyFinishReason(cand.Get("finishReason").String()).StopReason {
+	case "refusal", "max_tokens":
+		return false
+	}
+	return true
 }
 
 // appendOrCoalesceText appends text to the last content block if it is already

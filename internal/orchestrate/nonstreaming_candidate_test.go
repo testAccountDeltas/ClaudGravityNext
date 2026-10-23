@@ -200,3 +200,15 @@ func TestProcessCandidate_ThinkingFollowedByMultipleTextBlocksCoalesced(t *testi
 		t.Fatalf("expected cr.textChars %d, got %d", len("Part 1. Part 2."), cr.textChars)
 	}
 }
+
+func TestProcessCandidate_NoGroundingFooterAfterMaxTokensOrRefusal(t *testing.T) {
+	for _, fr := range []string{"MAX_TOKENS", "SAFETY"} {
+		candJSON := `{"finishReason":"` + fr + `","content":{"parts":[{"text":"partial"}]},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://example.com","title":"Example"}}]}}`
+		resp := newClaudeResp()
+		processCandidate(&reqctx.Params{}, gjson.Parse(candJSON), resp, []byte(`{}`), claude.Request{}, "sess")
+		blocks := resp["content"].([]map[string]interface{})
+		if txt := blocks[0]["text"].(string); strings.Contains(txt, "Sources") {
+			t.Fatalf("%s: footer must not be appended, got %q", fr, txt)
+		}
+	}
+}

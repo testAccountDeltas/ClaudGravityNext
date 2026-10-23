@@ -84,6 +84,10 @@ func PassthroughToReal(w http.ResponseWriter, r *http.Request) {
 	for k := range hopByHopHeaders {
 		outReq.Header.Del(k)
 	}
+	// Security: never forward the gateway's own tenant key / proxy secret to
+	// the real host, and drop all credentials when the Host was not a real
+	// Anthropic host (see scrub.go).
+	scrubCredentialHeaders(outReq.Header, isAnthropicHost(r.Host))
 	outHost := target.Host
 	if h, _, err := net.SplitHostPort(outHost); err == nil {
 		outHost = h

@@ -22,9 +22,15 @@ import (
 // Message.UnmarshalJSON), so every message this package sees already has
 // that shape.
 func ConservativeMessageTokens(m claude.Message, isLastAssistant bool) int {
+	return ConservativeMessageTokensFor(m, isLastAssistant, defaultProfile)
+}
+
+// ConservativeMessageTokensFor is ConservativeMessageTokens under an
+// explicit model-family Profile.
+func ConservativeMessageTokensFor(m claude.Message, isLastAssistant bool, prof Profile) int {
 	total := 0
 	for _, b := range m.Content {
-		total += blockCost(b, isLastAssistant, FlatTextTokens)
+		total += blockCostP(b, isLastAssistant, FlatTextTokens, prof)
 	}
 	return total
 }
@@ -72,6 +78,12 @@ func ConservativeToolsTokens(tools []claude.Tool) int {
 // ConservativeRequestTokens prices the full request's token count using
 // conservative flat pricing for system, tools, and message blocks.
 func ConservativeRequestTokens(req claude.Request) int {
+	return ConservativeRequestTokensFor(req, defaultProfile)
+}
+
+// ConservativeRequestTokensFor is ConservativeRequestTokens under an
+// explicit model-family Profile.
+func ConservativeRequestTokensFor(req claude.Request, prof Profile) int {
 	total := ConservativeSystemTokens(req.System) + ConservativeToolsTokens(req.Tools)
 	lastAssistantIdx := -1
 	for i := len(req.Messages) - 1; i >= 0; i-- {
@@ -81,7 +93,7 @@ func ConservativeRequestTokens(req claude.Request) int {
 		}
 	}
 	for i, m := range req.Messages {
-		total += ConservativeMessageTokens(m, i == lastAssistantIdx) + 3 // framing overhead
+		total += ConservativeMessageTokensFor(m, i == lastAssistantIdx, prof) + 3 // framing overhead
 	}
 	return total
 }

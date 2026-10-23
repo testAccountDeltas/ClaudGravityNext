@@ -72,14 +72,22 @@ func flattenAnyOfOneOf(jsonStr string, addPlaceholder bool) string {
 				selected = mergeObjectBranches(objectBranches)
 			}
 
-			selected = mergeBranchEnums(selected, items)
+			mixed := false
+			if addPlaceholder {
+				if ms, ok := mixedUnionSchema(items, allTypes); ok {
+					selected, mixed = ms, true
+				}
+			}
+			if !mixed {
+				selected = mergeBranchEnums(selected, items)
+			}
 
 			if parentDesc != "" {
 				selected = mergeDescriptionRaw(selected, parentDesc)
 			}
 
 			dedupedTypes := dedupeStrings(allTypes)
-			if len(dedupedTypes) > 1 {
+			if len(dedupedTypes) > 1 && !mixed {
 				hint := "Accepts: " + strings.Join(dedupedTypes, " | ")
 				selected = appendHintRaw(selected, hint)
 			}

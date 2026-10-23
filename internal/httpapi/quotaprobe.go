@@ -136,6 +136,7 @@ func tryQuotaProbeIntercept(clientKey string, tenant config.TenantConfig, bodyBy
 	if gjson.GetBytes(bodyBytes, "stream").Bool() {
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 		sendQuotaProbeSSE(w, respModel)

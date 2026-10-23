@@ -7,6 +7,8 @@ package orchestrate
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -108,4 +110,20 @@ func (w *idleWatchdog) Touch() {
 func (w *idleWatchdog) Stop() {
 	w.cancel()
 	<-w.done
+}
+
+// clientGone reports whether the CLIENT's request context is cancelled
+// (disconnect). A bare context.Canceled error is not enough to say so: the
+// idle watchdog cancels its own derived ctx, which also surfaces as
+// context.Canceled from the upstream call/stream but is a timeout (504),
+// not a 499 client disconnect.
+func clientGone(baseCtx context.Context) bool { return baseCtx.Err() != nil }
+
+// upstreamErrStatus maps an upstream transport error with a live client to
+// 504 when it is a cancellation (watchdog) and 502 otherwise.
+func upstreamErrStatus(err error) int {
+	if errors.Is(err, context.Canceled) {
+		return http.StatusGatewayTimeout
+	}
+	return http.StatusBadGateway
 }

@@ -196,14 +196,21 @@ func TestFSM_FinishStream_WriterFinished_NoMoreEventsAfterMessageStop(t *testing
 
 // --- FSM behaviors ported from sse.go ---
 
-func TestFSM_SecondThinkingBlock_Dropped(t *testing.T) {
+func TestFSM_SecondThinkingBlock_EmittedAsAdditionalBlock(t *testing.T) {
 	f, rec := newTestFSM(t, basicParams(), &reqctx.State{})
 	_ = f.HandleThinking("first thought", "sig1")
 	_ = f.closeCurrentBlock()
-	_ = f.HandleThinking("second thought — should be dropped", "")
+	_ = f.HandleText("some text")
+	_ = f.HandleThinking("second thought after text", "")
 	body := rec.Body.String()
-	if strings.Contains(body, "second thought") {
-		t.Fatalf("a second thinking block after the first closed must be dropped, got %s", body)
+	if !strings.Contains(body, "second thought after text") || strings.Count(body, `"type":"thinking"`) != 2 {
+		t.Fatalf("a later thought must become an additional thinking block, got %s", body)
+	}
+	_ = f.HandleFunctionCall("Read", `{}`, "")
+	before := rec.Body.Len()
+	_ = f.HandleThinking("after tool use", "")
+	if strings.Contains(rec.Body.String()[before:], "after tool use") {
+		t.Fatalf("thinking after a tool_use must still be dropped")
 	}
 }
 
@@ -272,6 +279,7 @@ func TestFSM_FinishStream_RecoversStopSequence(t *testing.T) {
 
 func TestFSM_FinishStream_IdempotentOnDoubleCall(t *testing.T) {
 	f, rec := newTestFSM(t, basicParams(), &reqctx.State{})
+	_ = f.HandleText("hello")
 	if err := f.FinishStream("STOP"); err != nil {
 		t.Fatalf("first FinishStream: %v", err)
 	}
@@ -306,8 +314,8 @@ func TestProcessGeminiChunk_PromptFeedbackBlocked_EmitsSafetyMessage(t *testing.
 		t.Fatalf("ProcessGeminiChunk: %v", err)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "flagged by upstream safety filters") {
-		t.Fatalf("expected safety-block message, got %s", body)
+	if strings.Contains(body, `"type":"text"`) || !strings.Contains(body, "promptFeedback.blockReason=SAFETY") {
+		t.Fatalf("expected content-less refusal citing the block reason in stop_details, got %s", body)
 	}
 	if !strings.Contains(body, `"stop_reason":"refusal"`) {
 		t.Fatalf("expected stop_reason refusal, got %s", body)
@@ -514,6 +522,7 @@ func TestFSM_CacheMiss_ResetsSessionFraction(t *testing.T) {
 	f := NewFSM(w, 1, p, st)
 	f.inputTokens = 2000
 	f.cacheTokens = 0
+	_ = f.HandleText("hello")
 	if err := f.FinishStream("STOP"); err != nil {
 		t.Fatalf("FinishStream: %v", err)
 	}
@@ -536,8 +545,8 @@ func TestFSM_FinishStream_RefusalClearsPrefill(t *testing.T) {
 	if strings.Contains(body, "```json") {
 		t.Fatalf("expected prefill text to NOT contaminate refusal text, got %s", body)
 	}
-	if !strings.Contains(body, "I'm not able to help with that request.") {
-		t.Fatalf("expected refusal message in body, got %s", body)
+	if strings.Contains(body, "I'm not able to help with that request.") || strings.Contains(body, `"type":"text"`) {
+		t.Fatalf("a refusal must not carry injected placeholder text, got %s", body)
 	}
 	if !strings.Contains(body, `"stop_reason":"refusal"`) {
 		t.Fatalf("expected stop_reason refusal, got %s", body)
@@ -820,14 +829,16 @@ func TestFinishStream_MessageDeltaUsageOnlyContainsOutputTokens(t *testing.T) {
 	if usage.Get("output_tokens").Int() != 25 {
 		t.Fatalf("expected output_tokens 25, got %v", usage.Get("output_tokens"))
 	}
-	if usage.Get("input_tokens").Exists() {
-		t.Fatalf("message_delta.usage must strictly NOT contain input_tokens, got: %s", deltaJSON)
+	// message_delta.usage carries the REAL counts: promptTokenCount 100 of
+	// which 40 cached -> 60 uncached input + 40 cache read.
+	if usage.Get("input_tokens").Int() != 60 {
+		t.Fatalf("message_delta.usage.input_tokens want 60, got: %s", deltaJSON)
 	}
-	if usage.Get("cache_creation_input_tokens").Exists() {
-		t.Fatalf("message_delta.usage must strictly NOT contain cache_creation_input_tokens, got: %s", deltaJSON)
+	if usage.Get("cache_creation_input_tokens").Int() != 0 {
+		t.Fatalf("message_delta.usage.cache_creation_input_tokens want 0, got: %s", deltaJSON)
 	}
-	if usage.Get("cache_read_input_tokens").Exists() {
-		t.Fatalf("message_delta.usage must strictly NOT contain cache_read_input_tokens, got: %s", deltaJSON)
+	if usage.Get("cache_read_input_tokens").Int() != 40 {
+		t.Fatalf("message_delta.usage.cache_read_input_tokens want 40, got: %s", deltaJSON)
 	}
 }
 
@@ -983,19 +994,22 @@ func TestGAP16_FinishStream_AllCombinations(t *testing.T) {
 		}
 	})
 
-	// Subtest B: Completely empty turn without prefill -> "(empty response)"
+	// Subtest B: Completely empty turn without prefill -> a retryable
+	// UpstreamTurnError and NOTHING injected into the stream.
 	t.Run("EmptyWithoutPrefill", func(t *testing.T) {
 		p := basicParams()
 		rec := httptest.NewRecorder()
 		w := NewSafeSSEWriter(1, rec, rec, nil)
+		w.HoldEvents()
 		f := NewFSM(w, 1, p, &reqctx.State{})
 
-		if err := f.FinishStream("STOP"); err != nil {
-			t.Fatalf("FinishStream: %v", err)
+		err := f.FinishStream("STOP")
+		var terr *UpstreamTurnError
+		if !errors.As(err, &terr) {
+			t.Fatalf("expected UpstreamTurnError for an empty turn, got %v", err)
 		}
-		body := rec.Body.String()
-		if !strings.Contains(body, "(empty response)") {
-			t.Fatalf("expected '(empty response)', got %s", body)
+		if rec.Body.Len() != 0 {
+			t.Fatalf("held empty turn must write nothing, got %s", rec.Body.String())
 		}
 	})
 
@@ -1036,8 +1050,8 @@ func TestGAP16_FinishStream_AllCombinations(t *testing.T) {
 		if strings.Contains(body, "My prefill") {
 			t.Fatalf("refusal must not contain user prefill: %s", body)
 		}
-		if !strings.Contains(body, "I'm not able to help with that request.") {
-			t.Fatalf("expected refusal fallback text: %s", body)
+		if strings.Contains(body, "I'm not able to help") || strings.Contains(body, `"type":"text"`) {
+			t.Fatalf("refusal must not carry injected text: %s", body)
 		}
 		if !strings.Contains(body, `"stop_reason":"refusal"`) {
 			t.Fatalf("expected stop_reason refusal: %s", body)
@@ -1305,8 +1319,8 @@ func TestStreamGeminiToClaude_PendingFinishReason_TrailingDone(t *testing.T) {
 	for _, l := range strings.Split(body, "\n") {
 		if strings.HasPrefix(l, "data: ") && strings.Contains(l, "message_delta") {
 			payload := strings.TrimPrefix(l, "data: ")
-			if gjson.Get(payload, "usage.input_tokens").Exists() {
-				t.Fatalf("message_delta must not contain input_tokens: %s", payload)
+			if gjson.Get(payload, "usage.input_tokens").Int() != 50 {
+				t.Fatalf("message_delta must carry the real/estimated input_tokens (50): %s", payload)
 			}
 			if !gjson.Get(payload, "usage.output_tokens").Exists() {
 				t.Fatalf("message_delta must contain output_tokens: %s", payload)
@@ -1540,6 +1554,7 @@ func TestPromptCaching_SessionCacheFraction_MultiTurnProgression(t *testing.T) {
 		p1 := basicParams()
 		p1.SessionID = sessionID
 		p1.HasPriorTurns = false
+		p1.ModelName = "claude-sonnet-4-5" // 1024-token cache minimum
 		st1 := &reqctx.State{EstInputTokens: 3000, CachePrefixFrac: 0.80}
 		rec1 := httptest.NewRecorder()
 		w1 := NewSafeSSEWriter(1, rec1, rec1, nil)
@@ -1569,6 +1584,7 @@ func TestPromptCaching_SessionCacheFraction_MultiTurnProgression(t *testing.T) {
 
 		f1.inputTokens = 3000
 		f1.cacheTokens = 0
+		_ = f1.HandleText("hello")
 		if err := f1.FinishStream("STOP"); err != nil {
 			t.Fatalf("Turn 1 FinishStream: %v", err)
 		}
@@ -1610,6 +1626,7 @@ func TestPromptCaching_SessionCacheFraction_MultiTurnProgression(t *testing.T) {
 
 		f2.inputTokens = 3200
 		f2.cacheTokens = 2600
+		_ = f2.HandleText("hello")
 		if err := f2.FinishStream("STOP"); err != nil {
 			t.Fatalf("Turn 2 FinishStream: %v", err)
 		}
@@ -1672,14 +1689,10 @@ func TestPromptCaching_NoDoubleCountingInClaudeCode(t *testing.T) {
 		if strings.HasPrefix(line, "data: ") && strings.Contains(line, "message_delta") {
 			payload := strings.TrimPrefix(line, "data: ")
 			u := gjson.Get(payload, "usage")
-			if u.Get("input_tokens").Exists() {
-				t.Fatalf("message_delta must NOT contain input_tokens, found: %s", u.Raw)
-			}
-			if u.Get("cache_read_input_tokens").Exists() {
-				t.Fatalf("message_delta must NOT contain cache_read_input_tokens, found: %s", u.Raw)
-			}
-			if u.Get("cache_creation_input_tokens").Exists() {
-				t.Fatalf("message_delta must NOT contain cache_creation_input_tokens, found: %s", u.Raw)
+			// input_tokens (uncached 500) + cache_read (1000) = the full 1500
+			// prompt: no token is counted twice.
+			if u.Get("input_tokens").Int() != 500 || u.Get("cache_read_input_tokens").Int() != 1000 {
+				t.Fatalf("message_delta usage must carry real input 500 / cache_read 1000, got: %s", u.Raw)
 			}
 			if u.Get("output_tokens").Int() != 120 {
 				t.Fatalf("expected output_tokens 120, got: %s", u.Raw)
@@ -1687,5 +1700,3 @@ func TestPromptCaching_NoDoubleCountingInClaudeCode(t *testing.T) {
 		}
 	}
 }
-
-

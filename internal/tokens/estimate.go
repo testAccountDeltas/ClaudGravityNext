@@ -16,10 +16,16 @@ import (
 // request's token count (system, messages, tool definitions) using
 // WeightedCharTokens for every text leaf.
 func WeightedRequestTokens(req claude.Request) int {
+	return WeightedRequestTokensFor(req, defaultProfile)
+}
+
+// WeightedRequestTokensFor is WeightedRequestTokens under an explicit
+// model-family Profile (see ProfileForModel).
+func WeightedRequestTokensFor(req claude.Request, prof Profile) int {
 	total := 0
 
 	total += weightedSystemTokens(req.System)
-	total += weightedMessagesTokens(req.Messages)
+	total += weightedMessagesTokens(req.Messages, prof)
 	total += weightedToolsTokens(req.Tools)
 
 	if total < 1 {
@@ -59,7 +65,7 @@ func weightedSystemTokens(sys claude.SystemPrompt) int {
 	return total
 }
 
-func weightedMessagesTokens(msgs []claude.Message) int {
+func weightedMessagesTokens(msgs []claude.Message, prof Profile) int {
 	if len(msgs) == 0 {
 		return 0
 	}
@@ -76,7 +82,7 @@ func weightedMessagesTokens(msgs []claude.Message) int {
 		isLastAssistant := m.Role == claude.RoleAssistant && i == lastAssistantIdx
 		total += 3 // per-message framing overhead
 		for _, b := range m.Content {
-			total += blockCost(b, isLastAssistant, WeightedCharTokens)
+			total += blockCostP(b, isLastAssistant, WeightedCharTokens, prof)
 		}
 	}
 	return total

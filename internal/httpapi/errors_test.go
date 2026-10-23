@@ -3,7 +3,11 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"claudgravity/internal/accounts"
 )
 
 func TestWriteAnthropicError_429SetsUnifiedResetAndRetryAfter(t *testing.T) {
@@ -71,9 +75,12 @@ func TestWriteAnthropicError_BodyShape(t *testing.T) {
 	w := httptest.NewRecorder()
 	WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "bad input")
 	body := w.Body.String()
-	want := `{"error":{"message":"bad input","type":"invalid_request_error"},"type":"error"}`
+	want := `{"error":{"message":"bad input","type":"invalid_request_error"},"request_id":"` + w.Header().Get("request-id") + `","type":"error"}`
 	if body != want {
 		t.Fatalf("body = %s, want %s", body, want)
+	}
+	if got := w.Header().Get("x-should-retry"); got != "false" {
+		t.Errorf("x-should-retry on 400 = %q, want false", got)
 	}
 	if got := w.Header().Get("anthropic-version"); got != "2023-06-01" {
 		t.Errorf("anthropic-version = %q, want 2023-06-01", got)
@@ -83,5 +90,59 @@ func TestWriteAnthropicError_BodyShape(t *testing.T) {
 	}
 	if got := w.Header().Get("x-request-id"); got == "" {
 		t.Error("x-request-id missing on error response")
+	}
+}
+
+func TestWriteAnthropicError_ShouldRetryHeader(t *testing.T) {
+	for status, want := range map[int]string{500: "true", 502: "true", 529: "true", 429: "true", 400: "false", 401: "false", 404: "false"} {
+		w := httptest.NewRecorder()
+		WriteAnthropicError(w, status, "api_error", "x")
+		if got := w.Header().Get("x-should-retry"); got != want {
+			t.Errorf("status %d: x-should-retry = %q, want %q", status, got, want)
+		}
+	}
+}
+
+func TestClientUpstreamMessage(t *testing.T) {
+	cases := []struct {
+		status int
+		in     string
+		want   string
+	}{
+		{502, "upstream failed after retries: upstream failed after retries: no accounts available in pool", "no accounts available in pool"},
+		{429, `upstream failed after retries: status 429: {"error":{"code":429,"message":"Resource has been exhausted","status":"RESOURCE_EXHAUSTED"}}`, "Rate limited by the upstream provider. Please retry later."},
+		{503, "Upstream failed after retries: [{\"error\": 1}]", "The upstream provider is temporarily unavailable. Please retry."},
+		{500, "", "Upstream request failed. Please retry."},
+	}
+	for _, c := range cases {
+		got := ClientUpstreamMessage(c.status, c.in)
+		if got != c.want {
+			t.Errorf("ClientUpstreamMessage(%d, %q) = %q, want %q", c.status, c.in, got, c.want)
+		}
+		if strings.Contains(strings.ToLower(got), "after retries") || strings.ContainsAny(got, "{}") {
+			t.Errorf("message leaks wrapper/JSON: %q", got)
+		}
+	}
+}
+
+func TestRetryAfterFromPoolCooldown(t *testing.T) {
+	now := time.Now()
+	rec := func(until time.Duration, disabled bool) *accounts.Record {
+		return &accounts.Record{CooldownUntil: now.Add(until), Disabled: disabled}
+	}
+	if d := retryAfterFromRecords(nil, now); d != 900*time.Second {
+		t.Errorf("empty pool = %v", d)
+	}
+	// Soonest cooldown among enabled accounts wins; disabled ones are ignored.
+	if d := retryAfterFromRecords([]*accounts.Record{rec(600*time.Second, false), rec(120*time.Second, false), rec(5*time.Second, true)}, now); d != 120*time.Second {
+		t.Errorf("soonest cooldown = %v, want 2m", d)
+	}
+	// Clamped to 15 minutes.
+	if d := retryAfterFromRecords([]*accounts.Record{rec(5*time.Hour, false)}, now); d != 900*time.Second {
+		t.Errorf("clamp = %v", d)
+	}
+	// An account usable now -> short retry.
+	if d := retryAfterFromRecords([]*accounts.Record{rec(120*time.Second, false), {}}, now); d != 30*time.Second {
+		t.Errorf("idle account = %v", d)
 	}
 }

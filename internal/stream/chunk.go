@@ -98,14 +98,11 @@ func (f *FSM) ProcessGeminiChunk(chunkJSON []byte) error {
 	// different key.
 	if pf := root.Get("promptFeedback"); pf.Exists() {
 		if br := pf.Get("blockReason").String(); br != "" && br != "BLOCK_REASON_UNSPECIFIED" {
-			_ = f.EnsureMessageStart()
-			// GAP-D1-13: HandleText below runs this refusal text through
-			// ApplyPrefill — without clearing the pending prefill first,
-			// an assistant-prefill request would get its own prefix
-			// glued onto the front of this safety-block message.
+			// A prompt-level block: refusal with no content (no injected
+			// explanation text — the reason goes in stop_details). The
+			// pending prefill must not be echoed onto a refusal.
 			f.prefillText = ""
-			_ = f.HandleText("I am unable to complete this request because it was flagged by upstream safety filters: " + br)
-			_ = f.closeCurrentBlock()
+			f.refusalDetail = "promptFeedback.blockReason=" + br
 			return f.FinishStream("SAFETY")
 		}
 	}
@@ -168,7 +165,6 @@ func (f *FSM) ProcessGeminiChunk(chunkJSON []byte) error {
 	}
 	if fr != "" && fr != "FINISH_REASON_UNSPECIFIED" {
 		f.pendingFinishReason = fr
-		f.appendGroundingSourcesFooter()
 		um := root.Get("usageMetadata")
 		hasUsage := um.Exists() && (um.Get("candidatesTokenCount").Exists() || um.Get("promptTokenCount").Exists())
 		if hasUsage || f.outputTokens > 0 {
@@ -206,6 +202,7 @@ func (f *FSM) applyUsageMetadata(um gjson.Result) {
 	tt := um.Get("thoughtsTokenCount").Int()
 	if ct > 0 || tt > 0 {
 		f.outputTokens = ct + tt
+		f.candTokens = ct
 		f.thinkingTokens = tt
 	}
 	if cc := um.Get("cachedContentTokenCount").Int(); cc > 0 {
@@ -241,6 +238,9 @@ func (f *FSM) processParts(parts gjson.Result) error {
 		}
 	}
 	for _, part := range parts.Array() {
+		if f.HasFinished() {
+			return nil // e.g. the client's max_tokens was reached mid-chunk
+		}
 		if err := f.processOnePart(part); err != nil {
 			return err
 		}
@@ -343,6 +343,11 @@ func (f *FSM) collectGroundingMetadata(gm gjson.Result) {
 // risks confusing stricter SDK parsers.
 func (f *FSM) appendGroundingSourcesFooter() {
 	if len(f.groundingSources) == 0 || f.toolUseOccurred {
+		return
+	}
+	if f.textChars == 0 && f.lastText == "" {
+		// Sources alone are not an answer; never let a footer turn an
+		// empty turn into one.
 		return
 	}
 	var sb strings.Builder

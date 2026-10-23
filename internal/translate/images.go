@@ -30,59 +30,6 @@ func isSVGMediaType(mediaType string) bool {
 	return tokens.IsSVGMediaType(mediaType)
 }
 
-// decodeAttachmentSource resolves an image/document source's base64
-// payload into either a ready inlineData part (isBinary==true) or
-// decoded plain text (isBinary==false) — the media_type defaulting,
-// data-URI stripping, and SVG-as-text exception both the top-level and
-// nested tool_result attachment paths need.
-func decodeAttachmentSource(ptype, rawMediaType, rawData string) (inlineDataPart string, isBinary bool, decodedText string, ok bool) {
-	mediaType := strings.ToLower(rawMediaType)
-	if idx := strings.Index(mediaType, ";"); idx != -1 {
-		mediaType = strings.TrimSpace(mediaType[:idx])
-	}
-	data := b64util.NormalizeBase64(rawData)
-	if data == "" {
-		return "", false, "", false
-	}
-	if mediaType == "" {
-		if ptype == "document" {
-			mediaType = "application/pdf"
-		} else {
-			mediaType = "image/png"
-		}
-	}
-	if !isSVGMediaType(mediaType) && (mediaType == "application/pdf" || strings.HasPrefix(mediaType, "image/")) {
-		part := `{"inlineData":{"mimeType":"","data":""}}`
-		part, _ = sjson.Set(part, "inlineData.mimeType", mediaType)
-		part, _ = sjson.Set(part, "inlineData.data", data)
-		return part, true, "", true
-	}
-	decoded, err := decodeBase64Loose(data)
-	if err != nil || len(decoded) == 0 {
-		return "", false, "", false
-	}
-	return "", false, string(decoded), true
-}
-
-// fetchAttachmentFromURL fetches a url-sourced attachment (see urlfetch.go
-// for the SSRF-safe transport) and routes it through the exact same
-// media-type decision decodeAttachmentSource already makes for a base64
-// source, so a fetched PDF/image gets inlineData and a fetched text
-// document gets a plain text part, consistently with every other
-// attachment path in this file.
-func fetchAttachmentFromURL(ptype, rawURL string) (inlineDataPart string, isBinary bool, text string, ok bool) {
-	body, contentType, fetched := fetchURLAttachment(rawURL)
-	if !fetched {
-		return "", false, "", false
-	}
-	mediaType := contentType
-	if idx := strings.Index(mediaType, ";"); idx != -1 {
-		mediaType = mediaType[:idx]
-	}
-	mediaType = strings.TrimSpace(mediaType)
-	return decodeAttachmentSource(ptype, mediaType, base64.StdEncoding.EncodeToString(body))
-}
-
 // convertImageDocumentBlock converts one top-level "image"/"document"
 // message-content block into zero or more Gemini parts.
 func convertImageDocumentBlock(ptype string, p gjson.Result, role string) []string {
@@ -152,7 +99,7 @@ func convertImageDocumentBlock(ptype string, p gjson.Result, role string) []stri
 	src := p.Get("source")
 	switch src.Get("type").String() {
 	case "base64":
-		if part, isBinary, text, ok := decodeAttachmentSource(ptype, src.Get("media_type").String(), src.Get("data").String()); ok {
+		if part, isBinary, text, ok := decodeAttachmentSource(ptype, src.Get("media_type").String(), src.Get("data").String(), p.Get("title").String()); ok {
 			if isBinary {
 				parts = append(parts, part)
 			} else {
@@ -175,7 +122,7 @@ func convertImageDocumentBlock(ptype string, p gjson.Result, role string) []stri
 				part := `{"text":""}`
 				part, _ = sjson.Set(part, "text", "[Assistant output "+ptype+" by URL: "+u+"]")
 				parts = append(parts, part)
-			} else if part, isBinary, text, ok := fetchAttachmentFromURL(ptype, u); ok {
+			} else if part, isBinary, text, ok := fetchAttachmentFromURL(ptype, u, p.Get("title").String()); ok {
 				if isBinary {
 					parts = append(parts, part)
 				} else {
@@ -254,7 +201,7 @@ func appendAttachmentToToolResult(item gjson.Result, sb *strings.Builder, imageP
 	src := item.Get("source")
 	switch src.Get("type").String() {
 	case "base64":
-		if part, isBinary, text, ok := decodeAttachmentSource(ptype, src.Get("media_type").String(), src.Get("data").String()); ok {
+		if part, isBinary, text, ok := decodeAttachmentSource(ptype, src.Get("media_type").String(), src.Get("data").String(), item.Get("title").String()); ok {
 			if isBinary {
 				*imageParts = append(*imageParts, part)
 			} else {
@@ -267,7 +214,7 @@ func appendAttachmentToToolResult(item gjson.Result, sb *strings.Builder, imageP
 		}
 	case "url":
 		if u := src.Get("url").String(); u != "" {
-			if part, isBinary, text, ok := fetchAttachmentFromURL(ptype, u); ok {
+			if part, isBinary, text, ok := fetchAttachmentFromURL(ptype, u, item.Get("title").String()); ok {
 				if isBinary {
 					*imageParts = append(*imageParts, part)
 				} else {

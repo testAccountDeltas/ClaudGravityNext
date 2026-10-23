@@ -56,6 +56,21 @@ func IsTransientNetworkError(status int, errText string) bool {
 	return false
 }
 
+// sessionWallMaxEstimate is the pre-flight input-token estimate above which
+// a "maximum number of tokens" 400 is a genuinely oversized prompt, not the
+// per-session wall: bumping the session cannot help and only burns retries.
+const sessionWallMaxEstimate = 900_000
+
+// IsSessionTokenWallErrorForEstimate is IsSessionTokenWallError gated by the
+// request's pre-flight token estimate: only a prompt clearly under the model
+// window (< ~900k of 1,048,576) can have hit the session wall.
+func IsSessionTokenWallErrorForEstimate(status int, errText string, estTokens int) bool {
+	if estTokens >= sessionWallMaxEstimate {
+		return false
+	}
+	return IsSessionTokenWallError(status, errText)
+}
+
 // isSessionTokenWallError matches Google's "per-session ~1,048,576-token
 // wall" 400 error — distinct from a genuine too-large-request rejection or a
 // 429 quota error, neither of which a session bump can fix.

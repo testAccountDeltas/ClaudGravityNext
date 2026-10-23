@@ -24,3 +24,9 @@ func TestIsModifyingToolName_MCPToolByKeyword(t *testing.T) {
 		t.Fatal("an mcp__ tool with no write/edit/create/delete/update/insert/modify/patch keyword must not be classified as modifying")
 	}
 }
+
+func TestIsModifyingToolName_StrReplaceBasedEditTool(t *testing.T) {
+	if !IsModifyingToolName("str_replace_based_edit_tool") {
+		t.Fatal("the 2025-07 text editor tool name must count as modifying")
+	}
+}

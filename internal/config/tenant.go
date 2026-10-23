@@ -20,8 +20,11 @@ type TenantConfig struct {
 	DefaultModel     string `json:"default_model"`
 	ThinkingBudget   int    `json:"thinking_budget"` // -1 for auto / high
 	StripSearchTools bool   `json:"strip_search_tools"`
-	StickyAccount    string `json:"sticky_account"` // Specific email pinned to this API key
-	Strategy         string `json:"strategy"`       // "sticky", "round_robin", "highest_quota"
+	// StripSearchToolsGemini3 re-enables Grep/Glob stripping on Gemini 3.x
+	// models (where they are declared by default).
+	StripSearchToolsGemini3 bool   `json:"strip_search_tools_gemini3"`
+	StickyAccount           string `json:"sticky_account"` // Specific email pinned to this API key
+	Strategy                string `json:"strategy"`       // "sticky", "round_robin", "highest_quota"
 }
 
 // UnmarshalJSON preserves GoogleAPIKey when reading from config.json on disk

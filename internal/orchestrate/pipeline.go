@@ -35,12 +35,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tidwall/gjson"
-
 	"claudgravity/internal/accounts"
 	"claudgravity/internal/logx"
 	"claudgravity/internal/ratelimit"
 	"claudgravity/internal/reqctx"
+	"claudgravity/internal/stream"
+	"claudgravity/internal/translate"
 	"claudgravity/internal/warmup"
 )
 
@@ -73,6 +73,24 @@ type Orchestrator struct{}
 // internal/stream.SafeSSEWriter.TerminateWithError already enforces one
 // layer down.
 func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx.State, w http.ResponseWriter) (ok bool, httpStatus int, retErr error) {
+	tracked, tracker := trackCommit(w)
+	ok, httpStatus, retErr = o.execute(ctx, p, st, tracked)
+	if !ok && tracker.Committed() {
+		// A keepalive ping (or an earlier attempt) already committed the
+		// 200 + SSE headers, so the caller can no longer write an HTTP
+		// error: the only honest way to report the failure is a terminal
+		// SSE error event. Content never reached the client, so SDKs see a
+		// clean "error" they can retry.
+		if f, isFlusher := tracked.(http.Flusher); isFlusher && p.IsStreaming {
+			errType, msg := terminalSSEError(httpStatus, retErr)
+			stream.WriteSSEError(tracked, f, errType, msg)
+		}
+		return true, httpStatus, retErr
+	}
+	return ok, httpStatus, retErr
+}
+
+func (o *Orchestrator) execute(ctx context.Context, p *reqctx.Params, st *reqctx.State, w http.ResponseWriter) (ok bool, httpStatus int, retErr error) {
 	flusher, hasFlusher := w.(http.Flusher)
 	isStreaming := p.IsStreaming && hasFlusher
 
@@ -87,8 +105,13 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 	success := false
 
 	baseModelName := st.ResolvedModelName
+	outputBumped := false // the one empty-MAX_TOKENS retry with a widened allowance was used
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	// 429-class rejections (cooldown applied, nothing sent to the client)
+	// do not consume one of the maxAttempts: each extends the budget by one
+	// try, up to maxTotal (the pool size, capped) on distinct accounts.
+	limit, maxTotal := maxAttempts, failoverCeiling(p)
+	for attempt := 0; attempt < limit; attempt++ {
 		attemptState := &reqctx.State{
 			Attempt:           attempt,
 			StartedAt:         st.StartedAt,
@@ -96,6 +119,9 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 			GeminiBody:        st.GeminiBody,
 			EstInputTokens:    st.EstInputTokens,
 			CachePrefixFrac:   st.CachePrefixFrac,
+			CacheFrac1h:       st.CacheFrac1h,
+
+			OutputAllowanceBumped: outputBumped,
 		}
 
 		var accLabel string
@@ -104,7 +130,14 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 		if !p.IsAntigravity {
 			accLabel = "DirectAPIKey"
 		} else {
-			acc, err := accounts.GlobalSelector().SelectAccountExcluding(p.ClientKey, convAnchor, p.Tenant, excludedAccounts)
+			acc, err := accounts.GlobalSelector().SelectAccountForModel(p.ClientKey, convAnchor, p.Tenant, excludedAccounts, baseModelName)
+			if err != nil && len(excludedAccounts) > 0 && isModelTurnFailure(lastErr) {
+				// The previous attempt failed on a bad MODEL turn, not on
+				// the account: prefer another account (above), but with no
+				// other account left retrying the same one is the right
+				// move (single-account pools).
+				acc, err = accounts.GlobalSelector().SelectAccountForModel(p.ClientKey, convAnchor, p.Tenant, map[string]bool{}, baseModelName)
+			}
 			if err != nil {
 				// The whole pool is on cooldown (every account quota-
 				// exhausted) — a rate-limit condition, not a gateway
@@ -118,9 +151,13 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 			attemptState.ActiveAccount = acc
 			tok, err := accounts.Manager().RefreshAccessToken(acc.Email)
 			if err != nil {
-				logx.LogGateway("[#%d] !! Token refresh failed for %s: %v (rotating account)", p.RID, acc.Email, err)
+				logx.LogGateway("[#%d] !! Token refresh failed for %s: %v (rotating account, attempt not consumed)", p.RID, acc.Email, err)
 				excludedAccounts[acc.Email] = true
 				lastErr = err
+				// An OAuth failure is the account's problem, not a request
+				// attempt: excludedAccounts grows each time, so this is bounded
+				// by the pool size.
+				attempt--
 				continue
 			}
 			attemptState.BearerToken = tok
@@ -203,7 +240,7 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 			}
 
 			logx.LogGateway("[#%d] >> POST /v1/messages [attempt %d/%d, session-gen %d] account=%s model=%s stream=%v bytes=%d [%s]",
-				p.RID, attempt+1, maxAttempts, bump, accLabel, attemptState.ResolvedModelName, isStreaming, len(finalPayload), p.AgentKey)
+				p.RID, attempt+1, limit, bump, accLabel, attemptState.ResolvedModelName, isStreaming, len(finalPayload), p.AgentKey)
 
 			if isStreaming {
 				success, lastStatus, lastErr = runStreamingAttempt(ctx, p, attemptState, accLabel, finalPayload, w, flusher)
@@ -236,7 +273,7 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 				continue
 			}
 
-			if warmup.IsSessionTokenWallError(lastStatus, errText) {
+			if warmup.IsSessionTokenWallErrorForEstimate(lastStatus, errText, int(st.EstInputTokens)) {
 				if bumpsThisAttempt >= maxBumpsPerAttempt {
 					break
 				}
@@ -261,7 +298,7 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 					accounts.GlobalSelector().RememberAffinity(convAnchor, attemptState.ActiveAccount.Email)
 				}
 			} else if attemptState.ActiveAccount != nil {
-				applyPostFailureCooldown(attemptState.ActiveAccount, lastStatus, lastErr)
+				applyPostFailureCooldownModel(attemptState.ActiveAccount, attemptState.ResolvedModelName, lastStatus, lastErr)
 			}
 			return true, lastStatus, nil
 		}
@@ -270,10 +307,22 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 		// upstream call just failed — not a verdict on the account at
 		// all. Retrying on a DIFFERENT account for a request nobody is
 		// listening for anymore just cycles the rest of the pool for no
-		// reason before giving up once maxAttempts runs out.
+		// reason before giving up once the attempt budget runs out.
 		if ctx.Err() != nil {
 			logx.LogGateway("[#%d] Client disconnected (%v), aborting retry loop without touching account state", p.RID, ctx.Err())
 			return false, 499, ctx.Err()
+		}
+
+		// MAX_TOKENS with no visible output because hidden thinking ate the
+		// whole output allowance: not the account's fault. Retry ONCE (same
+		// account, nothing excluded) with a widened maxOutputTokens; a second
+		// such turn is then reported as a plain max_tokens.
+		if te := asTurnError(lastErr); te != nil && te.NeedsMoreOutput && !outputBumped {
+			outputBumped = true
+			widened, bumped := translate.BumpOutputAllowance(st.GeminiBody, baseModelName)
+			logx.LogGateway("[#%d] !! Output limit hit while thinking with no visible output; retrying once with a wider allowance (widened=%v)", p.RID, bumped)
+			st.GeminiBody = widened
+			continue
 		}
 
 		// Client-side 400 Bad Request handling: if it's a thoughtSignature mismatch,
@@ -296,10 +345,13 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 
 		if attemptState.ActiveAccount != nil {
 			excludedAccounts[attemptState.ActiveAccount.Email] = true
-			applyPostFailureCooldown(attemptState.ActiveAccount, lastStatus, lastErr)
+			applyPostFailureCooldownModel(attemptState.ActiveAccount, attemptState.ResolvedModelName, lastStatus, lastErr)
+			if lastStatus == http.StatusTooManyRequests && limit < maxTotal {
+				limit++
+			}
 		}
 
-		if !p.IsAntigravity {
+		if !p.IsAntigravity && !isModelTurnFailure(lastErr) {
 			break // No multiple accounts to rotate for a direct API key.
 		}
 
@@ -312,76 +364,4 @@ func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx
 		return false, lastStatus, fmt.Errorf("upstream failed after retries: %w", lastErr)
 	}
 	return success, lastStatus, lastErr
-}
-
-// applyPostFailureCooldown mirrors v1's identical cooldown/unstick/
-// invalidate-token bookkeeping that ran at BOTH of its two call sites
-// (the early-headers-sent branch inside "if success" and the pre-headers
-// failure branch below it) — kept as one function so the two call sites
-// in Execute above can never drift out of sync with each other again,
-// the exact failure mode a Round 15 v1 audit caught between them.
-func applyPostFailureCooldown(acc *accounts.Record, status int, err error) {
-	switch {
-	case status == http.StatusTooManyRequests || strings.Contains(fmt.Sprint(err), "RESOURCE_EXHAUSTED"):
-		cooldown := 15 * time.Minute
-		errStr := fmt.Sprint(err)
-		if idx := strings.Index(errStr, "{"); idx != -1 {
-			parsed := gjson.Parse(errStr[idx:])
-			var resetTs string
-			var retryDelayStr string
-			isRPM := false
-			parsed.Get("error.details").ForEach(func(_, detail gjson.Result) bool {
-				quotaLimit := detail.Get("metadata.quotaLimit").String()
-				if strings.Contains(quotaLimit, "PerMinute") || strings.Contains(detail.Get("description").String(), "per minute") {
-					isRPM = true
-				}
-				if ts := detail.Get("metadata.quotaResetTimeStamp").String(); ts != "" {
-					resetTs = ts
-				} else if ts := detail.Get("metadata.quotaResetTimestamp").String(); ts != "" {
-					resetTs = ts
-				}
-				if delay := detail.Get("retryDelay").String(); delay != "" {
-					retryDelayStr = delay
-				}
-				return resetTs == "" || retryDelayStr == ""
-			})
-			if retryDelayStr != "" {
-				if d, err := time.ParseDuration(retryDelayStr); err == nil && d > 0 {
-					cooldown = d
-				}
-			} else if resetTs != "" {
-				now := time.Now()
-				if t, err := time.Parse(time.RFC3339Nano, resetTs); err == nil && t.After(now) {
-					cooldown = t.Sub(now)
-				} else if t, err := time.Parse(time.RFC3339, resetTs); err == nil && t.After(now) {
-					cooldown = t.Sub(now)
-				}
-			} else if isRPM {
-				cooldown = 30 * time.Second
-			}
-		}
-		accounts.Manager().MarkAccountCooldown(acc.Email, cooldown)
-		accounts.Manager().RecordAccountError(acc.Email, http.StatusTooManyRequests, fmt.Sprint(err), time.Now().Add(cooldown))
-		// GAP-ACC-01: without this, the session's sticky-account
-		// binding stayed pointed at an account that just got a 15-minute
-		// cooldown — a retry later in the SAME session (or a request
-		// sent moments later from an already-bound client) could get
-		// stuck selecting the same cooling-down account again instead
-		// of a healthy one.
-		accounts.GlobalSelector().UnstickAccount(acc.Email)
-		accounts.Manager().TriggerAsyncQuotaRefresh(acc.Email, 0)
-	case status == http.StatusForbidden:
-		// 403 means Google itself has rejected this account (banned,
-		// suspended, region-gated) — not a transient rate limit.
-		accounts.Manager().MarkAccountCooldown(acc.Email, 60*time.Minute)
-		accounts.Manager().RecordAccountError(acc.Email, status, fmt.Sprint(err), time.Now().Add(60*time.Minute))
-		accounts.GlobalSelector().UnstickAccount(acc.Email)
-	case status == http.StatusUnauthorized:
-		accounts.Manager().InvalidateAccessToken(acc.Email)
-		accounts.Manager().RecordAccountError(acc.Email, status, fmt.Sprint(err), time.Time{})
-	case status == http.StatusServiceUnavailable || status == 529 || strings.Contains(fmt.Sprint(err), "overloaded_error"):
-		accounts.Manager().MarkAccountCooldown(acc.Email, 3*time.Minute)
-		accounts.Manager().RecordAccountError(acc.Email, http.StatusServiceUnavailable, fmt.Sprint(err), time.Now().Add(3*time.Minute))
-		accounts.GlobalSelector().UnstickAccount(acc.Email)
-	}
 }

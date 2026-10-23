@@ -23,6 +23,8 @@ type Stats struct {
 	InputTokens        int64
 	OutputTokens       int64
 	CacheTokens        int64
+	FinishReason       string // upstream finishReason as received ("" if none)
+	StopReason         string // Anthropic stop_reason reported to the client
 }
 
 // Stats snapshots f's bookkeeping fields for the caller to read once
@@ -39,5 +41,7 @@ func (f *FSM) Stats() Stats {
 		InputTokens:        f.inputTokens,
 		OutputTokens:       f.outputTokens,
 		CacheTokens:        f.cacheTokens,
+		FinishReason:       f.finalFinishReason,
+		StopReason:         f.finalStopReason,
 	}
 }
