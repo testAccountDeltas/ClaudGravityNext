@@ -76,6 +76,9 @@ func estimateImageTokensP(b64Data string, prof Profile) int {
 		if est > prof.ImageMaxTokens {
 			est = prof.ImageMaxTokens
 		}
+		if est < prof.ImageMinTokens {
+			est = prof.ImageMinTokens
+		}
 		if est < 1 {
 			est = 1
 		}

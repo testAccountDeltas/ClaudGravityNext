@@ -101,11 +101,11 @@ func TestPruneAttachmentsByBytes_TopLevelAndSingleOversizedKept(t *testing.T) {
 
 func TestImageAndPDFProfiles(t *testing.T) {
 	g3 := Gemini3Profile
-	if got := estimateImageTokensP(pngB64(t, 1024, 768), g3); got < 1040 || got > 1060 {
-		t.Fatalf("1024x768 on 3.x = %d, want ~1048", got)
+	if got := estimateImageTokensP(pngB64(t, 1024, 768), g3); got != 1088 {
+		t.Fatalf("1024x768 on 3.x = %d, want flat 1088", got)
 	}
-	if got := estimateImageTokensP(pngB64(t, 200, 200), g3); got < 50 || got > 56 {
-		t.Fatalf("200x200 on 3.x = %d, want ~53", got)
+	if got := estimateImageTokensP(pngB64(t, 200, 200), g3); got != 1088 {
+		t.Fatalf("200x200 on 3.x = %d, want flat 1088", got)
 	}
 	if got := estimateImageTokensP(pngB64(t, 4000, 3000), g3); got != 1120 {
 		t.Fatalf("large image on 3.x = %d, want cap 1120", got)

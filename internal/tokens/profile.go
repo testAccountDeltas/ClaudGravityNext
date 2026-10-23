@@ -18,18 +18,22 @@ type Profile struct {
 	// 768px tile pricing of Gemini 2.x.
 	ImagePixelsPerToken int
 	ImageMaxTokens      int
+	// ImageMinTokens floors area pricing: live Gemini 3.8 measurements
+	// show a flat ~1088 tokens for 32px..1024px images.
+	ImageMinTokens int
 }
 
 // Gemini2Profile is the legacy 258-per-tile / 258-per-page pricing.
 var Gemini2Profile = Profile{Name: "gemini-2.x", PDFTokensPerPage: geminiPDFTokensPerPage}
 
 // Gemini3Profile prices at the default media resolution: ~1120 tokens for
-// a full-size image (1024x768 ~ 1048, 200x200 ~ 54), 560 per PDF page.
+// an image (measured live: 32x32 .. 1024x1024 all bill ~1088), 560 per PDF page.
 var Gemini3Profile = Profile{
 	Name:                "gemini-3.x",
 	PDFTokensPerPage:    560,
 	ImagePixelsPerToken: 750,
 	ImageMaxTokens:      1120,
+	ImageMinTokens:      1088,
 }
 
 // defaultProfile is used by callers that do not know the model: this
