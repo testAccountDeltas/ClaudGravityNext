@@ -76,6 +76,11 @@ func clamp(f float64) float64 {
 
 var modelRe = regexp.MustCompile(`(opus|sonnet|haiku)-(\d+)(?:[-.](\d+))?`)
 
+// UpstreamMinTokens is the smallest prefix Gemini's implicit cache actually
+// serves (measured live: ~3.5k tokens never hit, ~5.8k hit). Reporting a
+// cache write below it would promise a read that never happens.
+const UpstreamMinTokens = 4096
+
 // MinTokens returns the minimum cacheable prefix length for a model
 // (Anthropic prompt-caching docs): 4096 for Opus 4.5+ and Haiku 4.5+,
 // 2048 for Sonnet 4.6+ and older Haiku, 1024 otherwise.
@@ -121,7 +126,7 @@ func Split(model string, uncached, cacheRead int64, frac, frac1h float64) (tok5m
 		return 0, 0
 	}
 	prefix := int64(float64(uncached) * frac)
-	if prefix < MinTokens(model) {
+	if prefix < MinTokens(model) || prefix < UpstreamMinTokens {
 		return 0, 0
 	}
 	tok1h = int64(float64(uncached) * frac1h)

@@ -1554,8 +1554,8 @@ func TestPromptCaching_SessionCacheFraction_MultiTurnProgression(t *testing.T) {
 		p1 := basicParams()
 		p1.SessionID = sessionID
 		p1.HasPriorTurns = false
-		p1.ModelName = "claude-sonnet-4-5" // 1024-token cache minimum
-		st1 := &reqctx.State{EstInputTokens: 3000, CachePrefixFrac: 0.80}
+		p1.ModelName = "claude-sonnet-4-5" // above Gemini's real ~4096 cache floor
+		st1 := &reqctx.State{EstInputTokens: 6000, CachePrefixFrac: 0.80}
 		rec1 := httptest.NewRecorder()
 		w1 := NewSafeSSEWriter(1, rec1, rec1, nil)
 		f1 := NewFSM(w1, 1, p1, st1)
@@ -1572,17 +1572,17 @@ func TestPromptCaching_SessionCacheFraction_MultiTurnProgression(t *testing.T) {
 		if cachedTok1 != 0 {
 			t.Errorf("Turn 1 message_start cache_read: got %d, want 0", cachedTok1)
 		}
-		if creationTok1 != 2400 {
-			t.Errorf("Turn 1 message_start cache_creation: got %d, want 2400", creationTok1)
+		if creationTok1 != 4800 {
+			t.Errorf("Turn 1 message_start cache_creation: got %d, want 4800", creationTok1)
 		}
-		if inTok1 != 600 {
-			t.Errorf("Turn 1 message_start uncached input: got %d, want 600", inTok1)
+		if inTok1 != 1200 {
+			t.Errorf("Turn 1 message_start uncached input: got %d, want 1200", inTok1)
 		}
-		if inTok1+cachedTok1+creationTok1 != 3000 {
-			t.Errorf("Turn 1 conservation violated: %d + %d + %d != 3000", inTok1, cachedTok1, creationTok1)
+		if inTok1+cachedTok1+creationTok1 != 6000 {
+			t.Errorf("Turn 1 conservation violated: %d + %d + %d != 6000", inTok1, cachedTok1, creationTok1)
 		}
 
-		f1.inputTokens = 3000
+		f1.inputTokens = 6000
 		f1.cacheTokens = 0
 		_ = f1.HandleText("hello")
 		if err := f1.FinishStream("STOP"); err != nil {

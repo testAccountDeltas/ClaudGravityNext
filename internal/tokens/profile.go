@@ -2,7 +2,7 @@
 // Per-model-family media pricing. Gemini 2.x bills a flat 258 tokens per
 // 768px image tile and per PDF page; Gemini 3.x bills images at the
 // default (high) media resolution by pixel area, capped at 1120 tokens,
-// and PDF pages at 560 (Audit v2, item P.17).
+// and PDF pages at ~530 (Audit v2, item P.17).
 package tokens
 
 import "strings"
@@ -27,10 +27,10 @@ type Profile struct {
 var Gemini2Profile = Profile{Name: "gemini-2.x", PDFTokensPerPage: geminiPDFTokensPerPage}
 
 // Gemini3Profile prices at the default media resolution: ~1120 tokens for
-// an image (measured live: 32x32 .. 1024x1024 all bill ~1088), 560 per PDF page.
+// an image (measured live: 32x32 .. 1024x1024 all bill ~1088), 530 per PDF page (measured ~529).
 var Gemini3Profile = Profile{
 	Name:                "gemini-3.x",
-	PDFTokensPerPage:    560,
+	PDFTokensPerPage:    530,
 	ImagePixelsPerToken: 750,
 	ImageMaxTokens:      1120,
 	ImageMinTokens:      1088,

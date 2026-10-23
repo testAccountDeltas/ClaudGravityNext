@@ -48,6 +48,10 @@ func TestSplitNeverInvents(t *testing.T) {
 	if a, b := Split("claude-sonnet-4-5", 5000, 0, 0, 0); a+b != 0 {
 		t.Fatal("no breakpoint must be 0")
 	}
+	// above the Anthropic minimum but below Gemini's real cache floor -> 0
+	if a, b := Split("claude-sonnet-4-5", 6000, 0, 0.5, 0); a+b != 0 {
+		t.Fatalf("prefix 3000 < upstream floor must be 0, got %d %d", a, b)
+	}
 	a, b := Split("claude-sonnet-4-5", 10000, 0, 0.5, 0.2)
 	if a != 3000 || b != 2000 {
 		t.Fatalf("got %d %d", a, b)

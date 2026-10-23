@@ -117,7 +117,7 @@ func TestImageAndPDFProfiles(t *testing.T) {
 	if got := estimateImageTokensP(pngB64(t, 1024, 768), Gemini2Profile); got != 2*258 {
 		t.Fatalf("1024x768 on 2.x = %d, want %d", got, 2*258)
 	}
-	if ProfileForModel("gemini-2.5-pro").PDFTokensPerPage != 258 || ProfileForModel("gemini-3.8-flash").PDFTokensPerPage != 560 {
+	if ProfileForModel("gemini-2.5-pro").PDFTokensPerPage != 258 || ProfileForModel("gemini-3.8-flash").PDFTokensPerPage != 530 {
 		t.Fatal("ProfileForModel family selection wrong")
 	}
 }
