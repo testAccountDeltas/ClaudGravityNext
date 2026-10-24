@@ -218,6 +218,10 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 		"stop_details":  stopDetails,
 	}
 
+	if p.ContextManagement != nil {
+		claudeResp["context_management"] = p.ContextManagement
+	}
+
 	cand := geminiJSON.Get("candidates.0")
 	cr := processCandidate(p, cand, claudeResp, claudeBodyBytes, req, cwdKey)
 	toolsCalled, toolCallIDs, toolCallSignatures := cr.toolsCalled, cr.toolCallIDs, cr.toolCallSignatures

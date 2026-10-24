@@ -40,7 +40,7 @@ func classifyReqClass(r *http.Request, reqClass string, body []byte) string {
 // Claude Code's own retry logic only expects 400/422 for fields that truly
 // block the request.
 var ignoredRequestFields = []string{
-	"mcp_servers", "context_management", "service_tier", "speed",
+	"mcp_servers", "service_tier", "speed",
 	"inference_geo", "container", "betas",
 }
 

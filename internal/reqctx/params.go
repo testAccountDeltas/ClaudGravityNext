@@ -62,4 +62,8 @@ type Params struct {
 	ReverseToolNameMap   map[string]string
 
 	RawClaudeBody []byte
+
+	// ContextManagement is the response's context_management object
+	// (applied_edits) when the client sent context_management; nil otherwise.
+	ContextManagement map[string]interface{}
 }

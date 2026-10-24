@@ -52,6 +52,8 @@ type FSM struct {
 	messageID string
 	model     string
 
+	contextManagement map[string]interface{} // context_management.applied_edits for message_delta, nil if not requested
+
 	inputTokens    int64
 	outputTokens   int64
 	cacheTokens    int64
@@ -164,6 +166,7 @@ func NewFSM(writer *SafeSSEWriter, rid uint64, p *reqctx.Params, st *reqctx.Stat
 		prefillText:            p.PrefillText,
 		visibleCap:             p.MaxTokens,
 		retryEmptyMaxToken:     !st.OutputAllowanceBumped,
+		contextManagement:      p.ContextManagement,
 	}
 }
 

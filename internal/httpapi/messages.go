@@ -20,6 +20,7 @@ import (
 	"claudgravity/internal/accounts"
 	"claudgravity/internal/anthropicerr"
 	"claudgravity/internal/config"
+	"claudgravity/internal/ctxedit"
 	"claudgravity/internal/editrepair"
 	"claudgravity/internal/logx"
 	"claudgravity/internal/orchestrate"
@@ -171,6 +172,28 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 	}
 	editrepair.RecordSessionFileSnapshots(cwdKey, bodyBytes)
 
+	// Context editing (context_management.edits): the gateway clears old
+	// tool results / thinking itself, Gemini has no such feature.
+	ctxCfg, ctxErr := ctxedit.Parse(bodyBytes)
+	if ctxErr != nil {
+		WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error", ctxErr.Error())
+		return
+	}
+	var contextManagement map[string]interface{}
+	if ctxCfg.Present {
+		ctxRes, err := ctxedit.Apply(bodyBytes, ctxCfg)
+		if err != nil {
+			logx.LogGateway("[#%d] context editing failed, sending history unedited: %v", rid, err)
+		} else {
+			bodyBytes = ctxRes.Body
+			contextManagement = ctxedit.Response(ctxRes.Applied)
+			for _, e := range ctxRes.Applied {
+				logx.LogGateway("[#%d] context editing: %v (prompt ~%d -> ~%d tokens)", rid, e, ctxRes.OriginalTokens, ctxRes.Tokens)
+			}
+		}
+		bodyBytes = ctxedit.StripField(bodyBytes)
+	}
+
 	// 3. Full translation: tiering, LoopGuard, middle-truncation,
 	// sanitizer.
 	serverCfg := cfgMgr.GetServerConfig()
@@ -223,6 +246,7 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		SyntheticReasonTools: result.SyntheticReasonTools,
 		ReverseToolNameMap:   result.ReverseToolNameMap,
 		RawClaudeBody:        bodyBytes,
+		ContextManagement:    contextManagement,
 	}
 	st := &reqctx.State{
 		StartedAt:         t0,

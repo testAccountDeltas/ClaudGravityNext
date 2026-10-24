@@ -251,6 +251,9 @@ func (f *FSM) FinishStream(finishReason string) error {
 		"delta": deltaMap,
 		"usage": usage,
 	}
+	if f.contextManagement != nil {
+		deltaPayload["context_management"] = f.contextManagement
+	}
 	b, _ := json.Marshal(deltaPayload)
 	if err := f.writer.EmitEvent("message_delta", string(b)); err != nil {
 		return err

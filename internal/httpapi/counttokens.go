@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"claudgravity/internal/config"
+	"claudgravity/internal/ctxedit"
 	"claudgravity/internal/protocol/claude"
 	"claudgravity/internal/ratelimit"
 	"claudgravity/internal/tokens"
@@ -60,6 +61,20 @@ func handleCountTokens(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *h
 		bodyBytes = mergeAnthropicBetaHeader(bodyBytes, strings.Join(betaHeaders, ","))
 	}
 
+	// context_management.edits are applied first (the spec: input_tokens is
+	// the count AFTER editing, original_input_tokens the count before).
+	ctxCfg, ctxErr := ctxedit.Parse(bodyBytes)
+	if ctxErr != nil {
+		WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error", ctxErr.Error())
+		return
+	}
+	originalTokens := 0
+	if ctxCfg.Present {
+		if res, err := ctxedit.Apply(bodyBytes, ctxCfg); err == nil {
+			bodyBytes, originalTokens = res.Body, res.OriginalTokens
+		}
+	}
+
 	var req claude.Request
 	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		WriteAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "Request body must be valid JSON")
@@ -68,6 +83,12 @@ func handleCountTokens(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *h
 	estTokens := tokens.WeightedRequestTokens(req)
 	resp := map[string]interface{}{
 		"input_tokens": estTokens,
+	}
+	if ctxCfg.Present {
+		if originalTokens < estTokens {
+			originalTokens = estTokens
+		}
+		resp["context_management"] = map[string]interface{}{"original_input_tokens": originalTokens}
 	}
 	b, _ := json.Marshal(resp)
 	// Every other successful response sets these (organization/workspace
