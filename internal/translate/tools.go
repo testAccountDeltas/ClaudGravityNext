@@ -102,7 +102,12 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 				rawSchema = builtin
 			}
 		}
-		schemaRaw := schema.CleanJSONSchemaForAntigravity(sessionID, name, rawSchema)
+		var schemaRaw string
+		if tenant.UseParametersJsonSchema {
+			schemaRaw = rawParametersSchema(sessionID, name, rawSchema)
+		} else {
+			schemaRaw = schema.CleanJSONSchemaForAntigravity(sessionID, name, rawSchema)
+		}
 		needsPlaceholder := strings.TrimSpace(schemaRaw) == "" || schemaRaw == "null"
 		if !needsPlaceholder {
 			// A schema like "{}" or "{\"properties\":{}}" — no "type"
@@ -113,7 +118,9 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 			propsEmpty := !propsVal.Exists() || (propsVal.IsObject() && len(propsVal.Map()) == 0)
 			schemaType := gjson.Get(schemaRaw, "type").String()
 			if propsEmpty && (schemaType == "" || schemaType == "object") {
-				needsPlaceholder = true
+				// Raw mode keeps a root that is a composition (anyOf, $ref,
+				// ...) — it has no "properties" but is a real schema.
+				needsPlaceholder = !(tenant.UseParametersJsonSchema && hasCompositionRoot(schemaRaw))
 			}
 		}
 		if needsPlaceholder {
@@ -142,7 +149,11 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 		// GAP-CGN-D2-02 (GAP-D2-12): Gemini requires parameters to be strictly of type OBJECT.
 		// If a custom tool defines an input_schema with a scalar/array root, wrap it in an object.
 		if gjson.Get(schemaRaw, "type").String() != "object" {
-			schemaRaw = fmt.Sprintf(`{"type":"object","properties":{"__scalar_arg__":%s},"required":["__scalar_arg__"]}`, schemaRaw)
+			if tenant.UseParametersJsonSchema {
+				schemaRaw = wrapScalarRoot(schemaRaw)
+			} else {
+				schemaRaw = fmt.Sprintf(`{"type":"object","properties":{"__scalar_arg__":%s},"required":["__scalar_arg__"]}`, schemaRaw)
+			}
 		}
 
 		sanitizedName, ok := tn.disambiguatedToolName[name]
@@ -152,10 +163,14 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 		if sanitizedName != name {
 			reverseToolNameMap[sanitizedName] = name
 		}
-		decl := `{"name":"","description":"","parameters":{}}`
+		paramsKey := "parameters"
+		if tenant.UseParametersJsonSchema {
+			paramsKey = "parametersJsonSchema"
+		}
+		decl := `{"name":"","description":""}`
 		decl, _ = sjson.Set(decl, "name", sanitizedName)
 		decl, _ = sjson.Set(decl, "description", desc)
-		decl, _ = sjson.SetRaw(decl, "parameters", schemaRaw)
+		decl, _ = sjson.SetRaw(decl, paramsKey, schemaRaw)
 		decls = append(decls, decl)
 		sentToolNames[name] = sanitizedName
 		sentOriginals[name] = sanitizedName

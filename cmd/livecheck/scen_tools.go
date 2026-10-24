@@ -40,6 +40,7 @@ func toolScenarios() []scenario {
 		{"tool_roundtrip_stream", func(t *target) error { return toolRoundtrip(t, true) }},
 		{"tool_parallel_calls", toolParallel},
 		{"tool_argument_types", toolTypes},
+		{"tool_complex_schema", toolComplexSchema},
 		{"tool_choice_forced", func(t *target) error { return forcedTool(t, "What is the weather in Rome?", false) }},
 		// Gemini ignores toolConfig mode ANY when the prompt has nothing to do
 		// with the tool (observed live); that is upstream behaviour, so a soft check.
@@ -173,4 +174,49 @@ func forcedTool(t *target, prompt string, soft bool) error {
 		return warnError{err.Error()}
 	}
 	return err
+}
+
+// complexTool uses $ref/$defs, anyOf, an integer enum and a nested array of
+// objects: all of it must survive translation (cleaned or raw) and come back
+// as correctly typed arguments.
+var complexTool = map[string]any{
+	"name":        "plan_trip",
+	"description": "Plan a trip. Always call with every field.",
+	"input_schema": map[string]any{
+		"type": "object",
+		"$defs": map[string]any{"Stop": map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"city": map[string]any{"type": "string"}, "nights": map[string]any{"type": "integer"}},
+			"required":   []string{"city", "nights"},
+		}},
+		"properties": map[string]any{
+			"stops":    map[string]any{"type": "array", "items": map[string]any{"$ref": "#/$defs/Stop"}},
+			"priority": map[string]any{"type": "integer", "enum": []int{1, 2, 3}},
+			"budget":   map[string]any{"anyOf": []any{map[string]any{"type": "integer"}, map[string]any{"type": "string", "enum": []string{"low", "high"}}}},
+		},
+		"required": []string{"stops", "priority", "budget"},
+	},
+}
+
+func toolComplexSchema(t *target) error {
+	m, err := t.messages(map[string]any{"tools": []any{complexTool},
+		"tool_choice": map[string]any{"type": "tool", "name": "plan_trip"},
+		"messages":    []any{user("Plan a trip: Rome for 2 nights, then Paris for 3 nights. Priority 2, budget 'high'.")}}, true)
+	if err != nil {
+		return err
+	}
+	if len(m.ToolUses) != 1 {
+		return fmt.Errorf("want 1 tool_use, got %d (text %q)", len(m.ToolUses), m.Text)
+	}
+	in := m.ToolUses[0].Input
+	stops, _ := in["stops"].([]any)
+	if len(stops) != 2 {
+		return fmt.Errorf("stops=%#v, want 2 entries", in["stops"])
+	}
+	s0, _ := stops[0].(map[string]any)
+	_, nightsNum := s0["nights"].(float64)
+	return firstErr(
+		need(nightsNum && s0["nights"] == float64(2), "stops[0]=%#v", s0),
+		need(in["priority"] == float64(2), "priority=%#v (want number 2)", in["priority"]),
+		need(in["budget"] == "high", "budget=%#v", in["budget"]))
 }

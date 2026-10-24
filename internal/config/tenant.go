@@ -22,7 +22,13 @@ type TenantConfig struct {
 	StripSearchTools bool   `json:"strip_search_tools"`
 	// StripSearchToolsGemini3 re-enables Grep/Glob stripping on Gemini 3.x
 	// models (where they are declared by default).
-	StripSearchToolsGemini3 bool   `json:"strip_search_tools_gemini3"`
+	StripSearchToolsGemini3 bool `json:"strip_search_tools_gemini3"`
+	// UseParametersJsonSchema sends each tool's input_schema to Gemini
+	// untouched in functionDeclarations[].parametersJsonSchema (full JSON
+	// Schema: $ref, anyOf/oneOf, const, bounds, patterns) instead of the
+	// lossy OpenAPI-subset `parameters` produced by the schema cleaner.
+	// Off by default; verified live against the Cloud Code endpoint.
+	UseParametersJsonSchema bool   `json:"use_parameters_json_schema"`
 	StickyAccount           string `json:"sticky_account"` // Specific email pinned to this API key
 	Strategy                string `json:"strategy"`       // "sticky", "round_robin", "highest_quota"
 }
