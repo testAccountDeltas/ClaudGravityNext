@@ -266,7 +266,9 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		return
 	}
 	if execErr != nil {
-		logx.LogGateway("[#%d] !! All pre-stream failover attempts failed: %v", rid, execErr)
+		if status != 499 { // 499 = client went away; Execute already logged that
+			logx.LogGateway("[#%d] !! All pre-stream failover attempts failed: %v", rid, execErr)
+		}
 		// Google's context-overflow 400 -> Anthropic's exact wording, which is
 		// what Claude Code's auto-compaction keys on (streaming and not).
 		if anthropicerr.IsContextExceeded(status, execErr.Error()) {

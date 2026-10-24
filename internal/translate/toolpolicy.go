@@ -7,6 +7,7 @@ package translate
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/tidwall/gjson"
 
@@ -136,6 +137,13 @@ func repairedNameAliases(sent map[string]string, editorName, bashName string) ma
 	return out
 }
 
+var droppedToolLogged sync.Map // "name|type" -> struct{}
+
+// logDroppedServerTool logs each dropped tool once per process: Claude Code
+// resends the same tool list on every request.
 func logDroppedServerTool(name, toolType string) {
+	if _, seen := droppedToolLogged.LoadOrStore(name+"|"+toolType, struct{}{}); seen {
+		return
+	}
 	logx.LogGateway("[Tools] dropping unsupported server tool %q (type %q): no schema and no gateway implementation", name, toolType)
 }

@@ -84,7 +84,7 @@ func (s *SQLiteLogStore) QuerySessions(limit int) []SessionSummary {
 		COALESCE(AVG(CASE WHEN in_tokens > 0 THEN cache_hit_rate END), 0) as avg_hit,
 		SUM(CASE WHEN agent_type = 'main' THEN 1 ELSE 0 END) as main_count,
 		SUM(CASE WHEN agent_type = 'subagent' THEN 1 ELSE 0 END) as sub_count,
-		SUM(CASE WHEN status >= 400 OR error != '' THEN 1 ELSE 0 END) as err_count,
+		SUM(CASE WHEN status != 499 AND (status >= 400 OR error != '') THEN 1 ELSE 0 END) as err_count,
 		SUM(CASE WHEN was_panicked = 1 THEN 1 ELSE 0 END) as panic_count,
 		GROUP_CONCAT(DISTINCT CASE WHEN subagent_name != '' THEN subagent_name END) as subagent_names
 	FROM request_logs
@@ -184,7 +184,7 @@ func (s *SQLiteLogStore) GetSessionDetail(sessionID string) (*SessionSummary, []
 		COALESCE(AVG(CASE WHEN in_tokens > 0 THEN cache_hit_rate END), 0) as avg_hit,
 		SUM(CASE WHEN agent_type = 'main' THEN 1 ELSE 0 END) as main_count,
 		SUM(CASE WHEN agent_type = 'subagent' THEN 1 ELSE 0 END) as sub_count,
-		SUM(CASE WHEN status >= 400 OR error != '' THEN 1 ELSE 0 END) as err_count,
+		SUM(CASE WHEN status != 499 AND (status >= 400 OR error != '') THEN 1 ELSE 0 END) as err_count,
 		SUM(CASE WHEN was_panicked = 1 THEN 1 ELSE 0 END) as panic_count
 	FROM request_logs
 	WHERE session_id = ?
