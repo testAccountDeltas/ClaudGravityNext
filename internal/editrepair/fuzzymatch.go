@@ -242,3 +242,58 @@ func findFuzzyLineMatch(fileContent, oldStr string) (string, []string, string, b
 
 	return "", nil, "", false
 }
+
+// alignLines maps old_string's lines 1..limit-1 to the lines of new_string that
+// carry the same text (-1 when none does). Identical lines at the start and at
+// the end are paired first, so a repeated line such as a closing "}" binds to
+// its real counterpart instead of to a look-alike the model inserted earlier;
+// whatever is left in the middle is paired in order, like a simple diff.
+func alignLines(oldLines, newLines []string, limit int) []int {
+	if limit > len(oldLines) {
+		limit = len(oldLines)
+	}
+	out := make([]int, len(oldLines))
+	for k := range out {
+		out[k] = -1
+	}
+	same := func(o, n string) bool {
+		return normalizeLineForMatch(strings.TrimLeft(o, " \t")) == normalizeLineForMatch(strings.TrimLeft(n, " \t"))
+	}
+	lo, oe, ne := 1, limit, len(newLines)
+	for lo < oe && lo < ne && same(oldLines[lo], newLines[lo]) {
+		out[lo] = lo
+		lo++
+	}
+	for oe > lo && ne > lo && same(oldLines[oe-1], newLines[ne-1]) {
+		out[oe-1] = ne - 1
+		oe, ne = oe-1, ne-1
+	}
+	from := lo
+	for k := lo; k < oe; k++ {
+		for j := from; j < ne; j++ {
+			if same(oldLines[k], newLines[j]) {
+				out[k] = j
+				from = j + 1
+				break
+			}
+		}
+	}
+	return out
+}
+
+// line0Counterpart reports the index k (>0, < limit) of the old_string line whose
+// text equals newLine0 when old_string's own line 0 does NOT, i.e. the model
+// deleted old line 0 and new_string now starts at what used to be line k.
+func line0Counterpart(oldStr, newLine0 string, limit int) (int, bool) {
+	oldLines := strings.Split(strings.ReplaceAll(oldStr, "\r\n", "\n"), "\n")
+	norm := func(s string) string { return normalizeLineForMatch(strings.TrimLeft(s, " \t")) }
+	if limit > len(oldLines) || norm(newLine0) == "" || norm(oldLines[0]) == norm(newLine0) {
+		return 0, false
+	}
+	for k := 1; k < limit; k++ {
+		if norm(oldLines[k]) == norm(newLine0) {
+			return k, true
+		}
+	}
+	return 0, false
+}

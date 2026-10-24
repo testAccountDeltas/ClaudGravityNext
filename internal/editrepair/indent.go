@@ -44,6 +44,10 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 		}
 	}
 	lineIndents = plain
+	anyZero := false
+	for _, z := range zero {
+		anyZero = anyZero || z
+	}
 	hasAny := false
 	for j, ind := range lineIndents {
 		if ind != "" || zero[j] {
@@ -94,29 +98,8 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 	// zeroes it out itself when its own start-offset shift already fixed
 	// it), so there's never a need to guess at a uniform indent for it the
 	// way lines 1..N do below.
-	if len(lineIndents) > 0 && lineIndents[0] == stripOnlyIndentMarker {
-		trimmed := strings.TrimLeft(lines[0], " \t")
-		if trimmed != lines[0] {
-			lines[0] = trimmed
-			changed = true
-		}
-	} else if len(lineIndents) > 0 && zero[0] {
-		if trimmed := strings.TrimLeft(lines[0], " 	"); trimmed != lines[0] {
-			lines[0] = trimmed
-			changed = true
-		}
-	} else if len(lineIndents) > 0 && lineIndents[0] != "" {
-		trimmed := strings.TrimLeft(lines[0], " \t")
-		if lineIndents[0]+trimmed != lines[0] {
-			lines[0] = lineIndents[0] + trimmed
-			changed = true
-		}
-	} else if len(lineIndents) > 0 && lineIndents[0] == "" && fileLine0Indent != "" && len(lines) > 0 && lines[0] != "" {
-		trimmed := strings.TrimLeft(lines[0], " \t")
-		if trimmed == lines[0] { // line 0 had no indent of its own
-			lines[0] = fileLine0Indent + trimmed
-			changed = true
-		}
+	if reindentLine0(lines, lineIndents, zero, fileLine0Indent, oldStr) {
+		changed = true
 	}
 
 	if len(lines) == len(lineIndents) {
@@ -218,7 +201,7 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 				lines[j] = target
 				changed = true
 			}
-		} else if baseIndent != "" {
+		} else if baseIndent != "" || anyZero {
 			// An audit caught that applying the SAME flat baseIndent to
 			// every line here flattens genuinely nested structure within
 			// the replacement itself: old_string spanning a for-loop with
@@ -251,26 +234,20 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 			}
 			assignedIndent := make([]string, len(lines))
 			assigned := make([]bool, len(lines))
-			searchFrom := 1
-			for k := 1; k < len(oldLines) && k < len(lineIndents); k++ {
-				oldOwnLeadingLen := len(oldLines[k]) - len(strings.TrimLeft(oldLines[k], " \t"))
-				oldContent := normalizeLineForMatch(oldLines[k][oldOwnLeadingLen:])
-				for j := searchFrom; j < len(lines); j++ {
-					if normalizeLineForMatch(strings.TrimLeft(lines[j], " \t")) != oldContent {
-						continue
-					}
-					realIndent := lineIndents[k]
-					if realIndent == "" && !zero[k] {
-						// Nothing was missing for this old line, meaning
-						// its own leading whitespace already equals the
-						// file's — that own whitespace IS the real indent.
-						realIndent = oldLines[k][:oldOwnLeadingLen]
-					}
-					assignedIndent[j] = realIndent
-					assigned[j] = true
-					searchFrom = j + 1
-					break
+			for k, j := range alignLines(oldLines, lines, len(lineIndents)) {
+				if j < 0 {
+					continue
 				}
+				oldOwnLeadingLen := len(oldLines[k]) - len(strings.TrimLeft(oldLines[k], " \t"))
+				realIndent := lineIndents[k]
+				if realIndent == "" && !zero[k] {
+					// Nothing was missing for this old line, meaning
+					// its own leading whitespace already equals the
+					// file's — that own whitespace IS the real indent.
+					realIndent = oldLines[k][:oldOwnLeadingLen]
+				}
+				assignedIndent[j] = realIndent
+				assigned[j] = true
 			}
 			// A genuinely new (unmatched) line most likely sits right next
 			// to a matched one in the model's own intended structure (a
@@ -301,6 +278,17 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 				originalOwnIndent[j] = l[:len(l)-len(strings.TrimLeft(l, " \t"))]
 			}
 			anchorOwnIndent := origLine0OwnIndent
+			if origLine0OwnIndent == "" && fileLine0Indent != "" {
+				// The model quoted line 0 without its indentation; its frame for
+				// that line is whatever the first matched line shows (own = real
+				// + extra), not "none".
+				for j := 1; j < len(lines); j++ {
+					if assigned[j] && assignedIndent[j] != "" && strings.HasPrefix(originalOwnIndent[j], assignedIndent[j]) {
+						anchorOwnIndent = fileLine0Indent + originalOwnIndent[j][len(assignedIndent[j]):]
+						break
+					}
+				}
+			}
 			anchorRealIndent := fileLine0Indent
 			for j := range lines {
 				if j == 0 {

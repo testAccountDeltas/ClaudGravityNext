@@ -223,10 +223,20 @@ func repairEditToolCallCore(toolName string, argsRaw string, sessionID string) (
 
 	// Direct byte-for-byte match already exists!
 	if strings.Contains(fileContent, oldStr) {
+		changed := false
 		if isCatNDump(newStr) && cleanNewStr() {
-			return argsRaw, true
+			changed = true
 		}
-		return argsRaw, false
+		if newStrKey != "" {
+			fixed, ok1 := matchIndentStyle(fileContent, newStr)
+			fixed, ok2 := matchLineEndings(fileContent, fixed)
+			if ok1 || ok2 {
+				if withNew, err := sjson.Set(argsRaw, newStrKey, fixed); err == nil {
+					argsRaw, changed = withNew, true
+				}
+			}
+		}
+		return argsRaw, changed
 	}
 
 	// An audit caught that stripCatNPrefix (added so a model copying its
@@ -353,6 +363,9 @@ func repairEditToolCallCore(toolName string, argsRaw string, sessionID string) (
 				// line added/removed), reapplyLineIndents falls back to a
 				// uniform best-effort indent for lines 1..N instead of a
 				// precise 1:1 mapping.
+				if styled, ok := matchIndentStyle(fileContent, effectiveNewStr); ok {
+					effectiveNewStr = styled
+				}
 				if reindented, did := reapplyLineIndents(effectiveNewStr, lineIndents, fileLine0Indent, oldStr); did {
 					effectiveNewStr = reindented
 				}
