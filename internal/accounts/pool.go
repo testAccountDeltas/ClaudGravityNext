@@ -132,6 +132,16 @@ var globalAccountManager = &AccountManager{
 	authDir:  "auths",
 }
 
+// ResetForTest empties the global pool (accounts, per-model cooldowns are
+// dropped with the records) and restores the default auth dir, so one
+// test's seeded accounts cannot leak into another test. Not for production.
+func ResetForTest() {
+	globalAccountManager.mu.Lock()
+	globalAccountManager.accounts = make(map[string]*Record)
+	globalAccountManager.authDir = "auths"
+	globalAccountManager.mu.Unlock()
+}
+
 // Broadcaster is implemented by internal/dashboard's WSHub. See this
 // file's doc comment for why accounts calls it through an interface
 // rather than importing dashboard directly.

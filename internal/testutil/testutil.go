@@ -34,6 +34,7 @@ func SeedAccounts(t *testing.T, n int) {
 		return Response(200, `{"access_token":"fresh","expires_in":3600}`), nil
 	})})
 	t.Cleanup(restore)
+	t.Cleanup(accounts.ResetForTest)
 	dir := t.TempDir()
 	for i := 0; i < n; i++ {
 		e := fmt.Sprintf("tu-%d@example.com", i)
