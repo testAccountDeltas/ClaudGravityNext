@@ -6,8 +6,8 @@ package dashboard
 
 import (
 	"encoding/json"
-	"testing"
 	"sync/atomic"
+	"testing"
 	"time"
 )
 

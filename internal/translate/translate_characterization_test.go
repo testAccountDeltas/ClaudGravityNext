@@ -858,96 +858,96 @@ func TestTranslateMessages_MultimodalOrder_ImageAndText(t *testing.T) {
 	if gjson.Get(parts[1].Raw, "text").String() != "What is in this image?" {
 		t.Fatalf("expected second part to be text, got %s", parts[1].Raw)
 	}
-	}
+}
 
 func TestApplyGenerationConfig_ThinkingDisabled_PreservesZeroTemperature(t *testing.T) {
-		req := gjson.Parse(`{
+	req := gjson.Parse(`{
 		"temperature": 0.0,
 		"max_tokens": 4096,
 		"thinking": {"type": "disabled"}
 		}`)
-		out, budget := applyGenerationConfig("{}", req, "gemini-3.8-flash-tiered", 0, true)
-		if budget != 0 {
+	out, budget := applyGenerationConfig("{}", req, "gemini-3.8-flash-tiered", 0, true)
+	if budget != 0 {
 		t.Fatalf("expected budget 0, got %d", budget)
-		}
-		if gjson.Get(out, "generationConfig.thinkingConfig.includeThoughts").Bool() != false {
+	}
+	if gjson.Get(out, "generationConfig.thinkingConfig.includeThoughts").Bool() != false {
 		t.Fatalf("expected includeThoughts=false, got %s", out)
-		}
-		if gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int() != 0 {
+	}
+	if gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int() != 0 {
 		t.Fatalf("expected thinkingBudget=0, got %s", out)
-		}
-		if gjson.Get(out, "generationConfig.temperature").Float() != 0.0 {
+	}
+	if gjson.Get(out, "generationConfig.temperature").Float() != 0.0 {
 		t.Fatalf("expected temperature 0.0 preserved when thinking disabled, got %f", gjson.Get(out, "generationConfig.temperature").Float())
-		}
-		if gjson.Get(out, "generationConfig.maxOutputTokens").Int() != 4096 {
+	}
+	if gjson.Get(out, "generationConfig.maxOutputTokens").Int() != 4096 {
 		t.Fatalf("expected maxOutputTokens 4096, got %d", gjson.Get(out, "generationConfig.maxOutputTokens").Int())
-		}
-		}
+	}
+}
 
-		func TestApplyGenerationConfig_ModeAuto_InflatesMaxOutputTokens(t *testing.T) {
-		req := gjson.Parse(`{
+func TestApplyGenerationConfig_ModeAuto_InflatesMaxOutputTokens(t *testing.T) {
+	req := gjson.Parse(`{
 		"temperature": 1.0,
 		"max_tokens": 8192
 		}`)
-		out, budget := applyGenerationConfig("{}", req, "gemini-3.8-flash-tiered", -1, true)
-		if budget != -1 {
+	out, budget := applyGenerationConfig("{}", req, "gemini-3.8-flash-tiered", -1, true)
+	if budget != -1 {
 		t.Fatalf("expected budget -1, got %d", budget)
-		}
-		if gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int() != -1 {
+	}
+	if gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int() != -1 {
 		t.Fatalf("expected thinkingBudget=-1 for Antigravity ModeAuto, got %d", gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int())
-		}
-		if gjson.Get(out, "generationConfig.thinkingConfig.includeThoughts").Bool() != true {
+	}
+	if gjson.Get(out, "generationConfig.thinkingConfig.includeThoughts").Bool() != true {
 		t.Fatalf("expected includeThoughts=true, got %s", out)
-		}
-		if gjson.Get(out, "generationConfig.maxOutputTokens").Int() != 64000 {
+	}
+	if gjson.Get(out, "generationConfig.maxOutputTokens").Int() != 64000 {
 		t.Fatalf("expected maxOutputTokens inflated to 64000 for ModeAuto, got %d", gjson.Get(out, "generationConfig.maxOutputTokens").Int())
-		}
-		}
+	}
+}
 
-		func TestApplyGenerationConfig_ExtendedThinking_AdjustsAtCeiling(t *testing.T) {
-		req := gjson.Parse(`{
+func TestApplyGenerationConfig_ExtendedThinking_AdjustsAtCeiling(t *testing.T) {
+	req := gjson.Parse(`{
 		"temperature": 0.2,
 		"max_tokens": 4096
 		}`)
-		// budget == 64000 (at ceiling)
-		out, adjBudget := applyGenerationConfig("{}", req, "gemini-3.8-flash-tiered", 64000, true)
-		if adjBudget != 64000-1024 {
+	// budget == 64000 (at ceiling)
+	out, adjBudget := applyGenerationConfig("{}", req, "gemini-3.8-flash-tiered", 64000, true)
+	if adjBudget != 64000-1024 {
 		t.Fatalf("expected budget adjusted to 62976 (ceiling - 1024), got %d", adjBudget)
-		}
-		if gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int() != 62976 {
-		t.Fatalf("expected thinkingBudget in JSON to be 62976, got %d", gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int())
-		}
-		if gjson.Get(out, "generationConfig.maxOutputTokens").Int() != 64000 {
-		t.Fatalf("expected maxOutputTokens to be 64000, got %d", gjson.Get(out, "generationConfig.maxOutputTokens").Int())
-		}
-		// Thinking active forces temperature to 1.0
-		if gjson.Get(out, "generationConfig.temperature").Float() != 1.0 {
-		t.Fatalf("expected temperature forced to 1.0 when thinking active, got %f", gjson.Get(out, "generationConfig.temperature").Float())
-		}
-		}
-
-	func TestAdversarial_SVG_ConvertsToTextPart(t *testing.T) {
-		svgXML := `<svg width="50" height="50"><rect width="50" height="50" style="fill:blue;" /></svg>`
-		b64SVG := base64.StdEncoding.EncodeToString([]byte(svgXML))
-		block := gjson.Parse(`{"type":"image","source":{"type":"base64","media_type":"image/svg+xml","data":"` + b64SVG + `"}}`)
-
-		parts := convertImageDocumentBlock("image", block, "user")
-		if len(parts) != 1 {
-			t.Fatalf("expected 1 part for SVG, got %d", len(parts))
-		}
-		// Verify it is a text part containing SVG XML, NOT inlineData
-		if gjson.Get(parts[0], "inlineData").Exists() {
-			t.Errorf("SVG must NOT be converted to inlineData, got %s", parts[0])
-		}
-		gotText := gjson.Get(parts[0], "text").String()
-		if gotText != svgXML {
-			t.Errorf("SVG text = %q, want %q", gotText, svgXML)
-		}
 	}
+	if gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int() != 62976 {
+		t.Fatalf("expected thinkingBudget in JSON to be 62976, got %d", gjson.Get(out, "generationConfig.thinkingConfig.thinkingBudget").Int())
+	}
+	if gjson.Get(out, "generationConfig.maxOutputTokens").Int() != 64000 {
+		t.Fatalf("expected maxOutputTokens to be 64000, got %d", gjson.Get(out, "generationConfig.maxOutputTokens").Int())
+	}
+	// Thinking active forces temperature to 1.0
+	if gjson.Get(out, "generationConfig.temperature").Float() != 1.0 {
+		t.Fatalf("expected temperature forced to 1.0 when thinking active, got %f", gjson.Get(out, "generationConfig.temperature").Float())
+	}
+}
 
-	func TestAdversarial_Document_SourceContent(t *testing.T) {
-		// 1. Literal string content
-		blockStr := gjson.Parse(`{
+func TestAdversarial_SVG_ConvertsToTextPart(t *testing.T) {
+	svgXML := `<svg width="50" height="50"><rect width="50" height="50" style="fill:blue;" /></svg>`
+	b64SVG := base64.StdEncoding.EncodeToString([]byte(svgXML))
+	block := gjson.Parse(`{"type":"image","source":{"type":"base64","media_type":"image/svg+xml","data":"` + b64SVG + `"}}`)
+
+	parts := convertImageDocumentBlock("image", block, "user")
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part for SVG, got %d", len(parts))
+	}
+	// Verify it is a text part containing SVG XML, NOT inlineData
+	if gjson.Get(parts[0], "inlineData").Exists() {
+		t.Errorf("SVG must NOT be converted to inlineData, got %s", parts[0])
+	}
+	gotText := gjson.Get(parts[0], "text").String()
+	if gotText != svgXML {
+		t.Errorf("SVG text = %q, want %q", gotText, svgXML)
+	}
+}
+
+func TestAdversarial_Document_SourceContent(t *testing.T) {
+	// 1. Literal string content
+	blockStr := gjson.Parse(`{
 			"type": "document",
 			"title": "notes.txt",
 			"context": "meeting notes",
@@ -956,19 +956,19 @@ func TestApplyGenerationConfig_ThinkingDisabled_PreservesZeroTemperature(t *test
 				"content": "Line 1\nLine 2"
 			}
 		}`)
-		partsStr := convertImageDocumentBlock("document", blockStr, "user")
-		if len(partsStr) != 2 {
-			t.Fatalf("expected 2 parts (context label + content), got %d: %v", len(partsStr), partsStr)
-		}
-		if !strings.Contains(partsStr[0], `notes.txt`) || !strings.Contains(partsStr[0], `meeting notes`) {
-			t.Errorf("part 0 must have document label, got %s", partsStr[0])
-		}
-		if gjson.Get(partsStr[1], "text").String() != "Line 1\nLine 2" {
-			t.Errorf("part 1 text = %q, want Line 1\\nLine 2", gjson.Get(partsStr[1], "text").String())
-		}
+	partsStr := convertImageDocumentBlock("document", blockStr, "user")
+	if len(partsStr) != 2 {
+		t.Fatalf("expected 2 parts (context label + content), got %d: %v", len(partsStr), partsStr)
+	}
+	if !strings.Contains(partsStr[0], `notes.txt`) || !strings.Contains(partsStr[0], `meeting notes`) {
+		t.Errorf("part 0 must have document label, got %s", partsStr[0])
+	}
+	if gjson.Get(partsStr[1], "text").String() != "Line 1\nLine 2" {
+		t.Errorf("part 1 text = %q, want Line 1\\nLine 2", gjson.Get(partsStr[1], "text").String())
+	}
 
-		// 2. Array of text blocks content
-		blockArr := gjson.Parse(`{
+	// 2. Array of text blocks content
+	blockArr := gjson.Parse(`{
 			"type": "document",
 			"source": {
 				"type": "content",
@@ -978,72 +978,72 @@ func TestApplyGenerationConfig_ThinkingDisabled_PreservesZeroTemperature(t *test
 				]
 			}
 		}`)
-		partsArr := convertImageDocumentBlock("document", blockArr, "user")
-		if len(partsArr) != 1 {
-			t.Fatalf("expected 1 part, got %d", len(partsArr))
-		}
-		if gjson.Get(partsArr[0], "text").String() != "Part A Part B" {
-			t.Errorf("combined text = %q, want Part A Part B", gjson.Get(partsArr[0], "text").String())
-		}
+	partsArr := convertImageDocumentBlock("document", blockArr, "user")
+	if len(partsArr) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(partsArr))
 	}
+	if gjson.Get(partsArr[0], "text").String() != "Part A Part B" {
+		t.Errorf("combined text = %q, want Part A Part B", gjson.Get(partsArr[0], "text").String())
+	}
+}
 
-	func TestAdversarial_Document_SourceURL_And_File(t *testing.T) {
-		// Assistant role URL attachment must become a placeholder
-		blockURL := gjson.Parse(`{
+func TestAdversarial_Document_SourceURL_And_File(t *testing.T) {
+	// Assistant role URL attachment must become a placeholder
+	blockURL := gjson.Parse(`{
 			"type": "document",
 			"source": {
 				"type": "url",
 				"url": "https://example.com/spec.pdf"
 			}
 		}`)
-		partsAsst := convertImageDocumentBlock("document", blockURL, "assistant")
-		if len(partsAsst) != 1 || !strings.Contains(partsAsst[0], "[Assistant output document: url]") {
-			t.Errorf("assistant document URL part = %v, want placeholder", partsAsst)
-		}
+	partsAsst := convertImageDocumentBlock("document", blockURL, "assistant")
+	if len(partsAsst) != 1 || !strings.Contains(partsAsst[0], "[Assistant output document: url]") {
+		t.Errorf("assistant document URL part = %v, want placeholder", partsAsst)
+	}
 
-		// Anthropic Files API reference must become a visible placeholder
-		blockFile := gjson.Parse(`{
+	// Anthropic Files API reference must become a visible placeholder
+	blockFile := gjson.Parse(`{
 			"type": "document",
 			"source": {
 				"type": "file",
 				"file_id": "file_xyz123"
 			}
 		}`)
-		partsFile := convertImageDocumentBlock("document", blockFile, "user")
-		if len(partsFile) != 1 || !strings.Contains(partsFile[0], "file_xyz123") {
-			t.Errorf("file part = %v, want Anthropic Files API placeholder", partsFile)
-		}
+	partsFile := convertImageDocumentBlock("document", blockFile, "user")
+	if len(partsFile) != 1 || !strings.Contains(partsFile[0], "file_xyz123") {
+		t.Errorf("file part = %v, want Anthropic Files API placeholder", partsFile)
 	}
+}
 
-	func TestAdversarial_HugeToolCallArguments(t *testing.T) {
-		// 1.5MB JSON argument inside tool_use
-		hugeStr := strings.Repeat("x", 1500000)
-		hugeInput := `{"file_path":"/tmp/huge.txt","content":"` + hugeStr + `"}`
-		block := gjson.Parse(`{
+func TestAdversarial_HugeToolCallArguments(t *testing.T) {
+	// 1.5MB JSON argument inside tool_use
+	hugeStr := strings.Repeat("x", 1500000)
+	hugeInput := `{"file_path":"/tmp/huge.txt","content":"` + hugeStr + `"}`
+	block := gjson.Parse(`{
 			"type": "tool_use",
 			"id": "toolu_huge_1",
 			"name": "Write",
 			"input": ` + hugeInput + `
 		}`)
 
-		tn := toolNameInfo{
-			effectiveToolNames:    map[string]bool{"Write": true},
-			disambiguatedToolName: map[string]string{"Write": "Write"},
-		}
-
-		parts := convertToolUseBlock(block, "assistant", tn, false)
-		if len(parts) != 1 {
-			t.Fatalf("expected 1 part, got %d", len(parts))
-		}
-		callName := gjson.Get(parts[0], "functionCall.name").String()
-		if callName != "Write" {
-			t.Errorf("call name = %q, want Write", callName)
-		}
-		contentLen := len(gjson.Get(parts[0], "functionCall.args.content").String())
-		if contentLen != 1500000 {
-			t.Errorf("huge content len = %d, want 1500000", contentLen)
-		}
+	tn := toolNameInfo{
+		effectiveToolNames:    map[string]bool{"Write": true},
+		disambiguatedToolName: map[string]string{"Write": "Write"},
 	}
+
+	parts := convertToolUseBlock(block, "assistant", tn, false)
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+	callName := gjson.Get(parts[0], "functionCall.name").String()
+	if callName != "Write" {
+		t.Errorf("call name = %q, want Write", callName)
+	}
+	contentLen := len(gjson.Get(parts[0], "functionCall.args.content").String())
+	if contentLen != 1500000 {
+		t.Errorf("huge content len = %d, want 1500000", contentLen)
+	}
+}
 
 // --- context overflow / attachments (W3) ---
 

@@ -720,7 +720,6 @@ func TestSanitize_DedupRepeatedRead_RelativePathNotMutatedInInput(t *testing.T) 
 	}
 }
 
-
 // Empty role:"system" messages mid-conversation (content "", [] or
 // [{text:""}]) must be dropped, not turned into a bare "[System Note]: "
 // user turn; an output_config they carry moves to the adjacent turn.

@@ -19,7 +19,7 @@ func TestRootFallbackDoesNotPassthroughByDefault(t *testing.T) {
 			t.Fatalf("%s: status = %d, want 404", path, rec.Code)
 		}
 		var body struct {
-			Type  string `json:"type"`
+			Type  string                `json:"type"`
 			Error struct{ Type string } `json:"error"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Type != "error" || body.Error.Type != "not_found_error" {

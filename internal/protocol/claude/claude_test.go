@@ -256,68 +256,67 @@ func TestRequest_FullRoundTrip(t *testing.T) {
 	if len(req.Tools) != 1 || req.Tools[0].Name != "Read" {
 		t.Fatalf("got tools=%+v", req.Tools)
 	}
-	}
+}
 
 func TestStopReason_PauseTurn_Serialization(t *testing.T) {
-		reasons := []struct {
+	reasons := []struct {
 		reason StopReason
 		want   string
-		}{
+	}{
 		{StopEndTurn, `"end_turn"`},
 		{StopMaxTokens, `"max_tokens"`},
 		{StopToolUse, `"tool_use"`},
 		{StopStopSequence, `"stop_sequence"`},
 		{StopRefusal, `"refusal"`},
 		{StopPauseTurn, `"pause_turn"`},
-		}
+	}
 
-		for _, tc := range reasons {
+	for _, tc := range reasons {
 		b, err := json.Marshal(tc.reason)
 		if err != nil {
-		t.Fatalf("marshal %s: %v", tc.reason, err)
+			t.Fatalf("marshal %s: %v", tc.reason, err)
 		}
 		if string(b) != tc.want {
-		t.Errorf("got %s, want %s", string(b), tc.want)
+			t.Errorf("got %s, want %s", string(b), tc.want)
 		}
 		var decoded StopReason
 		if err := json.Unmarshal(b, &decoded); err != nil {
-		t.Fatalf("unmarshal %s: %v", tc.reason, err)
+			t.Fatalf("unmarshal %s: %v", tc.reason, err)
 		}
 		if decoded != tc.reason {
-		t.Errorf("decoded %s, want %s", decoded, tc.reason)
+			t.Errorf("decoded %s, want %s", decoded, tc.reason)
 		}
-		}
-		}
+	}
+}
 
-		func TestMessageDeltaEvent_UsageContract_NoInputTokens(t *testing.T) {
-		ev := MessageDeltaEvent{
+func TestMessageDeltaEvent_UsageContract_NoInputTokens(t *testing.T) {
+	ev := MessageDeltaEvent{
 		Type: "message_delta",
 		Delta: MessageDelta{
-		StopReason: StopPauseTurn,
+			StopReason: StopPauseTurn,
 		},
 		Usage: MessageDeltaUsage{
-		OutputTokens: 42,
-		OutputTokensDetails: &OutputTokensDetails{
-		ThinkingTokens: 15,
+			OutputTokens: 42,
+			OutputTokensDetails: &OutputTokensDetails{
+				ThinkingTokens: 15,
+			},
 		},
-		},
-		}
-		b, err := json.Marshal(ev)
-		if err != nil {
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
 		t.Fatalf("marshal: %v", err)
-		}
-		str := string(b)
-		if !strings.Contains(str, `"stop_reason":"pause_turn"`) {
+	}
+	str := string(b)
+	if !strings.Contains(str, `"stop_reason":"pause_turn"`) {
 		t.Errorf("expected stop_reason:pause_turn, got: %s", str)
-		}
-		if !strings.Contains(str, `"output_tokens":42`) {
+	}
+	if !strings.Contains(str, `"output_tokens":42`) {
 		t.Errorf("expected output_tokens:42, got: %s", str)
-		}
-		if !strings.Contains(str, `"thinking_tokens":15`) {
+	}
+	if !strings.Contains(str, `"thinking_tokens":15`) {
 		t.Errorf("expected thinking_tokens:15, got: %s", str)
-		}
-		if strings.Contains(str, "input_tokens") {
+	}
+	if strings.Contains(str, "input_tokens") {
 		t.Errorf("message_delta must strictly NOT contain input_tokens, got: %s", str)
-		}
-		}
-
+	}
+}

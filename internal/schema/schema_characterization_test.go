@@ -452,4 +452,3 @@ func TestAdversarial_AnyOfThreeBranchesAndNested(t *testing.T) {
 	outNested := CleanJSONSchemaForAntigravity("sess1", "NestedTool", nestedAnyOf)
 	t.Logf("Nested anyOf output: %s", outNested)
 }
-

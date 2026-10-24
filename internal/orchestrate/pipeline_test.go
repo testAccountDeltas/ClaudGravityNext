@@ -319,4 +319,3 @@ func TestExecute_PreStreamFailover_Streaming_RetriesOnNextAccount(t *testing.T) 
 		t.Fatalf("expected different accounts on retry, got same account twice: %v", accountsUsed)
 	}
 }
-

@@ -136,51 +136,51 @@ func TestHandleEmbeddings_DefaultIsGeminiEmbedding001(t *testing.T) {
 	if resp.Model != "gemini-embedding-001" {
 		t.Errorf("model = %q, want gemini-embedding-001", resp.Model)
 	}
-	}
+}
 
 func TestHandleMessages_BodyExactLimitAndPlusOne(t *testing.T) {
-		cm := newTestConfigManager(t, "sk-good")
+	cm := newTestConfigManager(t, "sk-good")
 
-		// Exactly 25MB limit (maxRequestBodyBytes = 25*1024*1024 = 26214400)
-		// Body of exactly 25MB: MaxBytesReader should NOT trigger "request too large".
-		exactBody := strings.Repeat(" ", maxRequestBodyBytes)
-		wExact := httptest.NewRecorder()
-		rExact := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(exactBody))
-		rExact.Header.Set("x-api-key", "sk-good")
-		handleMessages(cm, wExact, rExact)
+	// Exactly 25MB limit (maxRequestBodyBytes = 25*1024*1024 = 26214400)
+	// Body of exactly 25MB: MaxBytesReader should NOT trigger "request too large".
+	exactBody := strings.Repeat(" ", maxRequestBodyBytes)
+	wExact := httptest.NewRecorder()
+	rExact := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(exactBody))
+	rExact.Header.Set("x-api-key", "sk-good")
+	handleMessages(cm, wExact, rExact)
 
-		// It should reach validation (and fail because empty/whitespace is not valid JSON, returning 400, NOT 413)
-		if wExact.Code != http.StatusBadRequest {
+	// It should reach validation (and fail because empty/whitespace is not valid JSON, returning 400, NOT 413)
+	if wExact.Code != http.StatusBadRequest {
 		t.Fatalf("exact 25MB status = %d, want %d (should reach validation, not 413)", wExact.Code, http.StatusBadRequest)
-		}
+	}
 
-		// Exactly 25MB + 1 byte: MaxBytesReader MUST trigger 413 request_too_large
-		overBody := strings.Repeat(" ", maxRequestBodyBytes+1)
-		wOver := httptest.NewRecorder()
-		rOver := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(overBody))
-		rOver.Header.Set("x-api-key", "sk-good")
-		handleMessages(cm, wOver, rOver)
+	// Exactly 25MB + 1 byte: MaxBytesReader MUST trigger 413 request_too_large
+	overBody := strings.Repeat(" ", maxRequestBodyBytes+1)
+	wOver := httptest.NewRecorder()
+	rOver := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(overBody))
+	rOver.Header.Set("x-api-key", "sk-good")
+	handleMessages(cm, wOver, rOver)
 
-		if wOver.Code != http.StatusRequestEntityTooLarge {
+	if wOver.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("25MB+1 status = %d, want %d", wOver.Code, http.StatusRequestEntityTooLarge)
-		}
-		var errResp map[string]interface{}
-		if err := json.Unmarshal(wOver.Body.Bytes(), &errResp); err != nil {
+	}
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(wOver.Body.Bytes(), &errResp); err != nil {
 		t.Fatalf("unmarshal 413 response: %v", err)
-		}
-		errObj, _ := errResp["error"].(map[string]interface{})
-		if errObj["type"] != "request_too_large" {
+	}
+	errObj, _ := errResp["error"].(map[string]interface{})
+	if errObj["type"] != "request_too_large" {
 		t.Errorf("error type = %v, want request_too_large", errObj["type"])
-		}
-		}
+	}
+}
 
-		func TestHandleMessages_PostTruncationInlineDataLimit(t *testing.T) {
-			cm := newTestConfigManager(t, "sk-good")
+func TestHandleMessages_PostTruncationInlineDataLimit(t *testing.T) {
+	cm := newTestConfigManager(t, "sk-good")
 
-			// Create a valid JSON request whose base64 image data exceeds 20MB (e.g. 21MB)
-			// Base64 chars: 21 * 1024 * 1024
-			hugeBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" + strings.Repeat("A", 21*1024*1024) // valid PNG magic, then padding
-			body := `{
+	// Create a valid JSON request whose base64 image data exceeds 20MB (e.g. 21MB)
+	// Base64 chars: 21 * 1024 * 1024
+	hugeBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" + strings.Repeat("A", 21*1024*1024) // valid PNG magic, then padding
+	body := `{
 				"model": "claude-sonnet-4-6",
 				"max_tokens": 100,
 				"messages": [
@@ -200,31 +200,31 @@ func TestHandleMessages_BodyExactLimitAndPlusOne(t *testing.T) {
 				]
 			}`
 
-			w := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
-			r.Header.Set("x-api-key", "sk-good")
-			handleMessages(cm, w, r)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	r.Header.Set("x-api-key", "sk-good")
+	handleMessages(cm, w, r)
 
-			if w.Code != http.StatusRequestEntityTooLarge {
-				t.Fatalf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
-			}
-			var errResp map[string]interface{}
-			if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			errObj, _ := errResp["error"].(map[string]interface{})
-			if errObj["type"] != "request_too_large" {
-				t.Errorf("error type = %v, want request_too_large", errObj["type"])
-			}
-			if !strings.Contains(errObj["message"].(string), "20MB") {
-				t.Errorf("message = %v, want it to mention 20MB limit", errObj["message"])
-			}
-		}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	errObj, _ := errResp["error"].(map[string]interface{})
+	if errObj["type"] != "request_too_large" {
+		t.Errorf("error type = %v, want request_too_large", errObj["type"])
+	}
+	if !strings.Contains(errObj["message"].(string), "20MB") {
+		t.Errorf("message = %v, want it to mention 20MB limit", errObj["message"])
+	}
+}
 
-		func TestHandleMessages_CitationsInRequestBody_Survives(t *testing.T) {
-			cm := newTestConfigManager(t, "sk-good")
+func TestHandleMessages_CitationsInRequestBody_Survives(t *testing.T) {
+	cm := newTestConfigManager(t, "sk-good")
 
-			body := `{
+	body := `{
 				"model": "claude-sonnet-4-6",
 				"max_tokens": 100,
 				"messages": [
@@ -250,34 +250,34 @@ func TestHandleMessages_BodyExactLimitAndPlusOne(t *testing.T) {
 				]
 			}`
 
-			w := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
-			r.Header.Set("x-api-key", "sk-good")
-			handleMessages(cm, w, r)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	r.Header.Set("x-api-key", "sk-good")
+	handleMessages(cm, w, r)
 
-			// In test config with dummy api key, it should pass validation and translation
-			// and attempt orchestrate.Execute (which fails upstream with 502/500, but NOT 400 invalid_request_error).
-			if w.Code == http.StatusBadRequest {
-				t.Fatalf("status = %d, citations must not fail validation with 400: %s", w.Code, w.Body.String())
-			}
-		}
+	// In test config with dummy api key, it should pass validation and translation
+	// and attempt orchestrate.Execute (which fails upstream with 502/500, but NOT 400 invalid_request_error).
+	if w.Code == http.StatusBadRequest {
+		t.Fatalf("status = %d, citations must not fail validation with 400: %s", w.Code, w.Body.String())
+	}
+}
 
-		func TestHandleMessages_ClientDisconnect_CancelsContext(t *testing.T) {
-			cm := newTestConfigManager(t, "sk-good")
+func TestHandleMessages_ClientDisconnect_CancelsContext(t *testing.T) {
+	cm := newTestConfigManager(t, "sk-good")
 
-			ctx, cancel := context.WithCancel(context.Background())
-			// Cancel immediately to simulate a client closing connection before first byte
-			cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel immediately to simulate a client closing connection before first byte
+	cancel()
 
-			body := `{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`
-			w := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)).WithContext(ctx)
-			r.Header.Set("x-api-key", "sk-good")
-			handleMessages(cm, w, r)
+	body := `{"model":"claude-sonnet-4-6","max_tokens":100,"messages":[{"role":"user","content":"hello"}]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)).WithContext(ctx)
+	r.Header.Set("x-api-key", "sk-good")
+	handleMessages(cm, w, r)
 
-			// Since context is cancelled, orchestrate fails with context.Canceled / 499.
-			// Must not hang, panic, or crash.
-			if w.Code == 200 {
-				t.Errorf("cancelled request should not return 200 OK")
-			}
-		}
+	// Since context is cancelled, orchestrate fails with context.Canceled / 499.
+	// Must not hang, panic, or crash.
+	if w.Code == 200 {
+		t.Errorf("cancelled request should not return 200 OK")
+	}
+}

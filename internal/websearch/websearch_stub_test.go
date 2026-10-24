@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"claudgravity/internal/testutil"
 	"context"
 	"io"
 	"net/http"
@@ -13,9 +14,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-type stubRT func(*http.Request) (*http.Response, error)
-
-func (f stubRT) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+type stubRT = testutil.RoundTripFunc
 
 func resp(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}

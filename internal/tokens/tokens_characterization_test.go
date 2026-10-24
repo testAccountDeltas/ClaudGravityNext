@@ -787,4 +787,3 @@ func TestTruncateConversationToFit_OrphanedToolResultHandledSafely(t *testing.T)
 		}
 	}
 }
-

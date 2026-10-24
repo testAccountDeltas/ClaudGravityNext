@@ -135,12 +135,12 @@ hostLoop:
 			DisplayName string `json:"displayName"`
 			Description string `json:"description"`
 			Buckets     []struct {
-				BucketID          string  `json:"bucketId"`
-				DisplayName       string  `json:"displayName"`
-				Window            string  `json:"window"`
-				ResetTime         string  `json:"resetTime"`
+				BucketID          string   `json:"bucketId"`
+				DisplayName       string   `json:"displayName"`
+				Window            string   `json:"window"`
+				ResetTime         string   `json:"resetTime"`
 				RemainingFraction *float64 `json:"remainingFraction"`
-				Description       string  `json:"description"`
+				Description       string   `json:"description"`
 			} `json:"buckets"`
 		} `json:"groups"`
 	}

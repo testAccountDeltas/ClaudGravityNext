@@ -1,6 +1,7 @@
 package orchestrate
 
 import (
+	"claudgravity/internal/testutil"
 	"context"
 	"fmt"
 	"io"
@@ -15,12 +16,7 @@ import (
 	"claudgravity/internal/reqctx"
 )
 
-// roundTripFunc wraps a function as an http.RoundTripper.
-type roundTripFunc func(req *http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
+type roundTripFunc = testutil.RoundTripFunc
 
 func TestStreaming_ContextCanceled_ReportsStatus499(t *testing.T) {
 	origTransport := httpClient.Transport
