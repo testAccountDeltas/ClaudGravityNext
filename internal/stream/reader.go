@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// keepaliveInterval is the SSE ping period while upstream is quiet. A
+// package var only so tests can shrink it; production never writes it.
+var keepaliveInterval = 5 * time.Second
+
 // StreamGeminiToClaude consumes an upstream SSE stream from Gemini and
 // translates them to Claude SSE events via f. onActivity, when non-nil,
 // is called every time bytes are actually read from upstream — the
@@ -18,7 +22,7 @@ import (
 // function-call chunk for a huge Write can legitimately take minutes to
 // arrive).
 func StreamGeminiToClaude(f *FSM, r io.Reader, onActivity func()) error {
-	pingTicker := time.NewTicker(5 * time.Second)
+	pingTicker := time.NewTicker(keepaliveInterval)
 	defer pingTicker.Stop()
 
 	stopPing := make(chan struct{})

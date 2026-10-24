@@ -20,6 +20,7 @@ import (
 
 func seedAccount(t *testing.T, email, token string) *accounts.Record {
 	t.Helper()
+	t.Cleanup(accounts.ResetForTest)
 	dir := t.TempDir()
 	path := filepath.Join(dir, email+".json")
 	content := fmt.Sprintf(`{"email":%q,"access_token":%q,"refresh_token":"ref"}`, email, token)

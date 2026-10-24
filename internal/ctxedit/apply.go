@@ -58,7 +58,7 @@ func Apply(body []byte, cfg Config) (Result, error) {
 	if !changed {
 		return res, nil
 	}
-	out, err := json.Marshal(msgs)
+	out, err := marshalLiteral(msgs)
 	if err != nil {
 		return res, err
 	}
@@ -69,6 +69,19 @@ func Apply(body []byte, cfg Config) (Result, error) {
 	res.Body = nb
 	res.Tokens = estimatePrompt(nb)
 	return res, nil
+}
+
+// marshalLiteral encodes without HTML escaping so '<', '>' and '&' in the
+// client's text stay literal (json.Marshal would escape them as backslash-u sequences).
+// Numbers survive exactly because the decoder used json.Number.
+func marshalLiteral(v interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 // StripField removes context_management from a body once handled so the

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -68,8 +69,8 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		WriteAnthropicError(w, http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
 		requestlog.Add(requestlog.RequestLog{
 			Timestamp: t0,
-			Key:       clientKey,
-			KeyMasked: requestlog.MaskKey(clientKey),
+			Key:       redactedKey(clientKey),
+			KeyMasked: redactedKey(clientKey),
 			Account:   "-",
 			SessionID: "-",
 			AgentKey:  "main",
@@ -87,7 +88,8 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		if err.Error() == "http: request body too large" {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
 			WriteAnthropicError(w, http.StatusRequestEntityTooLarge, "request_too_large", "Request body exceeds the 25MB limit")
 			return
 		}
@@ -315,4 +317,15 @@ func mergeAnthropicBetaHeader(bodyBytes []byte, headerVal string) []byte {
 		return updated
 	}
 	return bodyBytes
+}
+
+// redactedKey is what the request log stores for a credential that failed
+// authentication: never the submitted value itself (it may be a typo of a
+// real key), only a short prefix and its length.
+func redactedKey(k string) string {
+	k = strings.TrimSpace(k)
+	if len(k) <= 4 {
+		return "<redacted>"
+	}
+	return k[:4] + "...(" + strconv.Itoa(len(k)) + ")"
 }

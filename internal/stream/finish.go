@@ -5,7 +5,6 @@ package stream
 
 import (
 	"encoding/json"
-	"strings"
 
 	"claudgravity/internal/cacheusage"
 )
@@ -71,30 +70,20 @@ func (f *FSM) FinishStream(finishReason string) error {
 		stopReason = "tool_use"
 	}
 
-	// stop_sequence detection. UNCERTAIN: Gemini documents that a matched
-	// stopSequence is NOT included in the output and finishReason is a plain
-	// STOP, so for most responses there is no signal at all that a sequence
-	// (rather than a natural end) ended the turn, and we report end_turn. We
-	// only report stop_sequence when the sequence DOES show up in the
-	// not-yet-emitted tail of the text (the hold-back buffer keeps the last
-	// maxStopLen bytes for exactly this) — i.e. Gemini echoed it. The
-	// hold-back is therefore kept: removing it is only safe once a live
-	// capture proves Gemini never echoes the sequence.
-	matchedStopSequence := ""
-	if stopReason == "end_turn" && len(f.stopSequences) > 0 {
-		bestIdx := -1
-		for _, seq := range f.stopSequences {
-			if seq == "" {
-				continue
-			}
-			if i := strings.Index(f.textHoldBuffer, seq); i >= 0 && (bestIdx < 0 || i < bestIdx) {
-				bestIdx = i
-				matchedStopSequence = seq
-			}
+	// stop_sequence: the gateway matches client sequences itself over the
+	// whole text stream (HandleText); Gemini never sees them. A last scan
+	// of the not-yet-emitted tail covers a match only visible after the
+	// final sanitize/flush.
+	matchedStopSequence := f.stopMatched
+	if matchedStopSequence == "" && stopReason == "end_turn" && !f.toolUseOccurred {
+		if _, seq := f.findStopSequence(f.textHoldBuffer); seq != "" {
+			matchedStopSequence = seq
 		}
-		if matchedStopSequence != "" {
-			stopReason = "stop_sequence"
-		}
+	}
+	if matchedStopSequence != "" && stopReason == "end_turn" {
+		stopReason = "stop_sequence"
+	} else if stopReason != "stop_sequence" {
+		matchedStopSequence = ""
 	}
 
 	if !f.toolUseOccurred {

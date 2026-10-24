@@ -20,6 +20,19 @@ import (
 // arguments before emitting chunks.
 const StreamingChunkTimeout = 180 * time.Second
 
+const (
+	defaultTTFTTimeout       = 180 * time.Second
+	defaultMaxStreamDuration = 30 * time.Minute
+)
+
+// Package vars so tests can shrink them (testhooks.go); production never
+// writes them. watchdogTick is how often the watchdog checks for silence;
+// streamChunkTimeout is the inter-chunk limit runStreamingAttempt applies.
+var (
+	watchdogTick       = 2 * time.Second
+	streamChunkTimeout = StreamingChunkTimeout
+)
+
 // idleWatchdog cancels its context when upstream goes silent for longer
 // than the active idle timeout (ttftTimeout before any bytes are received,
 // chunkTimeout once streaming starts), with maxDuration as an absolute safety
@@ -32,6 +45,8 @@ const StreamingChunkTimeout = 180 * time.Second
 type idleWatchdog struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	ttftTimeout, chunkTimeout, maxDuration time.Duration // effective limits after defaulting
 
 	lastActivity atomic.Int64
 	firstTouch   atomic.Bool
@@ -47,21 +62,22 @@ type idleWatchdog struct {
 // quota for a response nobody will ever read.
 func startIdleWatchdog(baseCtx context.Context, rid uint64, ttftTimeout, chunkTimeout, maxDuration time.Duration) *idleWatchdog {
 	if ttftTimeout <= 0 {
-		ttftTimeout = 180 * time.Second
+		ttftTimeout = defaultTTFTTimeout
 	}
 	if chunkTimeout <= 0 {
 		chunkTimeout = StreamingChunkTimeout
 	}
 	if maxDuration <= 0 {
-		maxDuration = 30 * time.Minute
+		maxDuration = defaultMaxStreamDuration
 	}
 	ctx, cancel := context.WithCancel(baseCtx)
-	w := &idleWatchdog{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	w := &idleWatchdog{ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		ttftTimeout: ttftTimeout, chunkTimeout: chunkTimeout, maxDuration: maxDuration}
 	w.lastActivity.Store(time.Now().UnixNano())
 
 	go func() {
 		defer close(w.done)
-		ticker := time.NewTicker(2 * time.Second)
+		ticker := time.NewTicker(watchdogTick)
 		defer ticker.Stop()
 		start := time.Now()
 		for {
@@ -69,12 +85,7 @@ func startIdleWatchdog(baseCtx context.Context, rid uint64, ttftTimeout, chunkTi
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				limit := ttftTimeout
-				phase := "TTFT"
-				if w.firstTouch.Load() {
-					limit = chunkTimeout
-					phase = "inter-chunk"
-				}
+				limit, phase := w.currentLimit()
 				silentFor := time.Since(time.Unix(0, w.lastActivity.Load()))
 				if silentFor > limit {
 					logx.LogGateway("[#%d] !! Idle watchdog (%s): no bytes from upstream for %.0fs (limit %.0fs) -> cancelling", rid, phase, silentFor.Seconds(), limit.Seconds())
@@ -90,6 +101,15 @@ func startIdleWatchdog(baseCtx context.Context, rid uint64, ttftTimeout, chunkTi
 		}
 	}()
 	return w
+}
+
+// currentLimit is the idle limit in force: ttftTimeout until the first
+// bytes arrive, chunkTimeout afterwards.
+func (w *idleWatchdog) currentLimit() (time.Duration, string) {
+	if w.firstTouch.Load() {
+		return w.chunkTimeout, "inter-chunk"
+	}
+	return w.ttftTimeout, "TTFT"
 }
 
 // Touch records upstream activity, transitioning the watchdog from the

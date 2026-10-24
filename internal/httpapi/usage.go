@@ -124,6 +124,9 @@ func handleUsage(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http.Re
 	for _, g := range acc.Quotas {
 		var bList []usageBucketOut
 		for _, b := range g.Buckets {
+			if b.FractionUnknown {
+				continue // upstream gave no fraction: do not present it as 0%
+			}
 			pct := float64(int(b.RemainingFraction*1000+0.5)) / 10.0
 			bList = append(bList, usageBucketOut{
 				Window:           b.Window,

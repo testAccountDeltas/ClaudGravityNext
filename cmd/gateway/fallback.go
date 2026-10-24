@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strings"
@@ -46,6 +47,6 @@ func installSecretMatcher(cfgMgr *config.ConfigManager) {
 			return true
 		}
 		ps := cfgMgr.ProxySecret()
-		return ps != "" && v == ps
+		return ps != "" && subtle.ConstantTimeCompare([]byte(v), []byte(ps)) == 1
 	})
 }

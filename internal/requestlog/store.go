@@ -154,8 +154,15 @@ func InitLogStore(dbPath string) error {
 	}
 	stopCh := make(chan struct{})
 	globalLogStore.stopCh = stopCh
+	oldDB := globalLogStore.db
 	globalLogStore.db = db
 	globalLogStore.mu.Unlock()
+	// A second InitLogStore used to orphan the previous *sql.DB (open file
+	// handles + WAL until process exit). Add holds mu.RLock across its Exec,
+	// so by the time the swap above completed no writer is mid-statement.
+	if oldDB != nil {
+		_ = oldDB.Close()
+	}
 
 	// Clean up records older than 24h at startup and periodically
 	go func() {
@@ -276,10 +283,10 @@ func (s *SQLiteLogStore) Add(entry RequestLog) {
 }
 
 func (s *SQLiteLogStore) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.db == nil {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	_, _ = s.db.Exec("DELETE FROM request_logs")
 }

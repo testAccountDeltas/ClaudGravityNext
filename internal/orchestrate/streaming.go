@@ -42,10 +42,10 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 	serverCfg := p.ServerCfg
 	panicTimeout := time.Duration(serverCfg.PanicTimeoutSeconds) * time.Second
 	idleTimeout := time.Duration(serverCfg.TTFTTimeoutSeconds) * time.Second
-	chunkTimeout := StreamingChunkTimeout
+	chunkTimeout := streamChunkTimeout
 	maxStreamDuration := time.Duration(serverCfg.MaxStreamDurationSeconds) * time.Second
 	if maxStreamDuration <= 0 {
-		maxStreamDuration = 30 * time.Minute
+		maxStreamDuration = defaultMaxStreamDuration
 	}
 
 	wd := startIdleWatchdog(baseCtx, p.RID, idleTimeout, chunkTimeout, maxStreamDuration)

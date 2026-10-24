@@ -80,7 +80,7 @@ func isShellTool(nameLower string) bool {
 // validation on the Claude side.
 func NormalizeToArgsObject(name, argsRaw string) string {
 	var v interface{}
-	if err := json.Unmarshal([]byte(argsRaw), &v); err != nil {
+	if err := strictDecode(argsRaw, &v); err != nil {
 		// Gemini commonly emits a literal, unescaped control character
 		// (0x0A newline, 0x0D carriage return, 0x09 tab) inside a
 		// multi-line string argument — e.g. a Bash heredoc or a Write
@@ -95,7 +95,7 @@ func NormalizeToArgsObject(name, argsRaw string) string {
 		if repaired == argsRaw {
 			return "{}"
 		}
-		if err2 := json.Unmarshal([]byte(repaired), &v); err2 != nil {
+		if err2 := strictDecode(repaired, &v); err2 != nil {
 			return "{}"
 		}
 		argsRaw = repaired
@@ -103,7 +103,7 @@ func NormalizeToArgsObject(name, argsRaw string) string {
 	wasDoubleEncoded := false
 	if s, ok := v.(string); ok {
 		var inner interface{}
-		if err := json.Unmarshal([]byte(s), &inner); err == nil {
+		if err := strictDecode(s, &inner); err == nil {
 			v = inner
 			wasDoubleEncoded = true
 		}
@@ -139,7 +139,7 @@ func NormalizeToArgsObject(name, argsRaw string) string {
 			wasDoubleEncoded = true
 		} else if s, isStr := scalarVal.(string); isStr {
 			var innerObj interface{}
-			if err := json.Unmarshal([]byte(s), &innerObj); err == nil {
+			if err := strictDecode(s, &innerObj); err == nil {
 				if innerMap, ok := innerObj.(map[string]interface{}); ok {
 					m = innerMap
 					v = m

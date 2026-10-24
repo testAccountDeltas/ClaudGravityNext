@@ -7,16 +7,17 @@ package dashboard
 import (
 	"encoding/json"
 	"testing"
+	"sync/atomic"
 	"time"
 )
 
 type fakeWSConn struct {
-	closed bool
+	closed atomic.Bool
 }
 
 func (f *fakeWSConn) Read(p []byte) (int, error)         { return 0, nil }
 func (f *fakeWSConn) Write(p []byte) (int, error)        { return len(p), nil }
-func (f *fakeWSConn) Close() error                       { f.closed = true; return nil }
+func (f *fakeWSConn) Close() error                       { f.closed.Store(true); return nil }
 func (f *fakeWSConn) SetWriteDeadline(t time.Time) error { return nil }
 func (f *fakeWSConn) SetReadDeadline(t time.Time) error  { return nil }
 
@@ -50,7 +51,7 @@ func TestWSClient_CloseIsIdempotent(t *testing.T) {
 	c, fc := newTestClient()
 	c.Close()
 	c.Close() // must not panic on double-close (close(c.send) twice would panic)
-	if !fc.closed {
+	if !fc.closed.Load() {
 		t.Fatal("underlying conn must be closed")
 	}
 	if !c.IsClosed() {
@@ -100,7 +101,7 @@ func TestWSHub_UnregisterRemovesClientAndCloses(t *testing.T) {
 	c.requestUnregister(h)
 	time.Sleep(20 * time.Millisecond)
 
-	if !fc.closed {
+	if !fc.closed.Load() {
 		t.Fatal("unregistering a client must close its underlying connection")
 	}
 }

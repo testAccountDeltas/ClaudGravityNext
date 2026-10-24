@@ -26,7 +26,10 @@ func handleAPIBootstrap(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *
 	key := r.URL.Query().Get("key")
 	if key == "" {
 		if auth := r.Header.Get("Authorization"); auth != "" {
-			key = strings.TrimPrefix(auth, "Bearer ")
+			key = strings.TrimSpace(auth)
+			if len(key) > 7 && strings.EqualFold(key[:7], "bearer ") {
+				key = strings.TrimSpace(key[7:])
+			}
 		}
 	}
 	if key == "" {

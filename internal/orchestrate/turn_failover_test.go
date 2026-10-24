@@ -55,8 +55,14 @@ func tfRunN(t *testing.T, nAcc int, claude string, streaming bool, up tfUpstream
 	})})
 	defer restore()
 	dir := t.TempDir()
+	// Emails are unique per test and the pool is emptied afterwards: async
+	// quota-refresh goroutines and selector state left behind by an earlier
+	// test are keyed by email and must never reach this test's records
+	// (-shuffle used to flake TestExecute_429sBoundedByPoolSize on that).
+	t.Cleanup(accounts.ResetForTest)
+	tag := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
 	for i := 0; i < nAcc; i++ {
-		e := fmt.Sprintf("w1-%d@example.com", i)
+		e := fmt.Sprintf("w1-%d-%s@example.com", i, tag)
 		_ = os.WriteFile(filepath.Join(dir, e+".json"), []byte(fmt.Sprintf(`{"email":%q,"access_token":"token-%d","refresh_token":"ref%d"}`, e, i+1, i+1)), 0644)
 	}
 	if err := accounts.InitAccountManager(dir, config.ServerConfig{}); err != nil {

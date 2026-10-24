@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/tidwall/gjson"
@@ -249,34 +248,9 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 		return false, terr.Status, terr
 	}
 
-	if claudeResp["stop_reason"] == "end_turn" {
-		// UNCERTAIN: Gemini normally strips a matched stopSequence from the
-		// output with a plain STOP finishReason, in which case there is no
-		// signal and this stays end_turn. When the sequence IS echoed back
-		// it is detected anywhere in the last text block (not only as a
-		// suffix) and the text is cut at its first occurrence (GAP-D1-07:
-		// the client must never see the matched sequence).
-		if blocks, ok := claudeResp["content"].([]map[string]interface{}); ok {
-			for i := len(blocks) - 1; i >= 0; i-- {
-				if blocks[i]["type"] != "text" {
-					continue
-				}
-				txt, _ := blocks[i]["text"].(string)
-				bestIdx, bestSeq := -1, ""
-				for _, seq := range req.StopSequences {
-					if idx := strings.Index(txt, seq); seq != "" && idx >= 0 && (bestIdx < 0 || idx < bestIdx) {
-						bestIdx, bestSeq = idx, seq
-					}
-				}
-				if bestSeq != "" {
-					claudeResp["stop_reason"] = "stop_sequence"
-					claudeResp["stop_sequence"] = bestSeq
-					blocks[i]["text"] = txt[:bestIdx]
-				}
-				break
-			}
-		}
-	}
+	// Gemini is not given the client's stop_sequences (it would hide that
+	// one fired); the gateway cuts the text itself, same as the stream FSM.
+	applyStopSequences(claudeResp, usageMap, req.StopSequences, thinkingTok)
 
 	enforceMaxTokens(claudeResp, usageMap, req.MaxTokens, outTok-thinkingTok, thinkingTok, hasToolUse)
 

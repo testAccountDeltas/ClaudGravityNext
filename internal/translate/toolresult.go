@@ -55,7 +55,7 @@ func convertToolResultBlock(p gjson.Result, role string, toolIDToName map[string
 			rawText = sb.String()
 		}
 		if len(rawText) > 500 {
-			rawText = rawText[:500] + "... [truncated]"
+			rawText = cutUTF8(rawText, 500) + "... [truncated]"
 		}
 		part := `{"text":""}`
 		part, _ = sjson.Set(part, "text", fmt.Sprintf("[Prior tool result for %s omitted]: %s", toolUseID, rawText))
@@ -119,7 +119,7 @@ func convertToolResultBlock(p gjson.Result, role string, toolIDToName map[string
 		// same way an orphaned functionCall does.
 		resultPreview := resText
 		if len(resultPreview) > 200 {
-			resultPreview = resultPreview[:200] + "..."
+			resultPreview = cutUTF8(resultPreview, 200) + "..."
 		}
 		// Neutral prose, not bracket notation — see toolcall.go's own
 		// equivalent fix for why: a live incident showed the model

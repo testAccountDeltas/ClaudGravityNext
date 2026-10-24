@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -67,6 +66,10 @@ var (
 
 const deadRefreshTokenCooldown = 5 * time.Minute
 
+// refreshNow is the clock RefreshAccessToken uses for token expiry and
+// negative-cache deadlines; a var so tests can drive it deterministically.
+var refreshNow = time.Now
+
 func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 	am.mu.RLock()
 	acc, ok := am.accounts[email]
@@ -75,7 +78,10 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("account %s not found", email)
 	}
-	if acc.RefreshToken == "" {
+	am.mu.RLock()
+	hasRefresh := acc.RefreshToken != ""
+	am.mu.RUnlock()
+	if !hasRefresh {
 		return "", fmt.Errorf("account %s has no refresh token", email)
 	}
 
@@ -88,9 +94,10 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 	am.mu.RLock()
 	cachedToken := acc.AccessToken
 	cachedExpiry := acc.ExpiresAt
+	curRefresh := acc.RefreshToken
 	am.mu.RUnlock()
 	const refreshSafetyMargin = 60 * time.Second
-	if cachedToken != "" && time.Now().Add(refreshSafetyMargin).Before(cachedExpiry) {
+	if cachedToken != "" && refreshNow().Add(refreshSafetyMargin).Before(cachedExpiry) {
 		return cachedToken, nil
 	}
 
@@ -98,7 +105,7 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 	deadUntil, isDead := deadRefreshTokens[email]
 	deadRefreshTokensMu.Unlock()
 	if isDead {
-		if time.Now().Before(deadUntil) {
+		if refreshNow().Before(deadUntil) {
 			// Generic wording now that this cache also covers a short-lived
 			// network-failure cooldown, not just a definitively invalid
 			// refresh token.
@@ -113,7 +120,7 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 	data.Set("client_id", AntigravityClientID)
 	data.Set("client_secret", AntigravityClientSecret)
 	data.Set("grant_type", "refresh_token")
-	data.Set("refresh_token", acc.RefreshToken)
+	data.Set("refresh_token", curRefresh)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -125,7 +132,7 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "google-api-nodejs-client/9.15.1")
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		// An audit caught that a genuine network-level failure here
 		// (timeout, DNS failure, connection refused — this call has its
@@ -140,7 +147,7 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 		// case below) lets concurrent waiters fail fast without
 		// meaningfully delaying recovery once the blip passes.
 		deadRefreshTokensMu.Lock()
-		deadRefreshTokens[email] = time.Now().Add(10 * time.Second)
+		deadRefreshTokens[email] = refreshNow().Add(10 * time.Second)
 		deadRefreshTokensMu.Unlock()
 		return "", err
 	}
@@ -152,7 +159,7 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 		// HTTP 429 triggers a short 10s cooldown to avoid hammering Google.
 		if resp.StatusCode == http.StatusTooManyRequests {
 			deadRefreshTokensMu.Lock()
-			deadRefreshTokens[email] = time.Now().Add(10 * time.Second)
+			deadRefreshTokens[email] = refreshNow().Add(10 * time.Second)
 			deadRefreshTokensMu.Unlock()
 			am.MarkAccountCooldown(email, 10*time.Second)
 			globalSelector.UnstickAccount(email)
@@ -161,7 +168,7 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 		oauthErr := gjson.GetBytes(bodyBytes, "error").String()
 		if oauthErr == "invalid_grant" || oauthErr == "invalid_request" || oauthErr == "unauthorized_client" || oauthErr == "invalid_client" {
 			deadRefreshTokensMu.Lock()
-			deadRefreshTokens[email] = time.Now().Add(deadRefreshTokenCooldown)
+			deadRefreshTokens[email] = refreshNow().Add(deadRefreshTokenCooldown)
 			deadRefreshTokensMu.Unlock()
 			// An audit caught that deadRefreshTokens alone only makes
 			// THIS function fail fast on a dead account — it says nothing
@@ -174,7 +181,7 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 			am.MarkAccountCooldown(email, deadRefreshTokenCooldown)
 			// Needs a manual re-login; surface it (sticky for a day) so the
 			// dashboard says so instead of just showing a short cooldown.
-			am.RecordAccountError(email, resp.StatusCode, "OAuth "+oauthErr+": "+string(bodyBytes), time.Now().Add(24*time.Hour))
+			am.RecordAccountError(email, resp.StatusCode, "OAuth "+oauthErr+": "+string(bodyBytes), refreshNow().Add(24*time.Hour))
 			// A Round 15 audit caught MarkAccountCooldown alone doesn't
 			// unstick this account from any session it's already pinned
 			// to — sticky-session affinity (globalSelector) keeps routing
@@ -199,19 +206,17 @@ func (am *AccountManager) RefreshAccessToken(email string) (string, error) {
 
 	am.mu.Lock()
 	acc.AccessToken = newAccToken
-	acc.ExpiresAt = time.Now().Add(time.Duration(expSeconds) * time.Second)
+	acc.ExpiresAt = refreshNow().Add(time.Duration(expSeconds) * time.Second)
 	filePath := acc.FilePath
-	if newRefreshToken != "" && newRefreshToken != acc.RefreshToken {
+	if newRefreshToken != "" {
 		acc.RefreshToken = newRefreshToken
 	}
 	am.mu.Unlock()
 
 	if newRefreshToken != "" && filePath != "" {
-		if data, err := os.ReadFile(filePath); err == nil {
-			if updated, err := sjson.SetBytes(data, "refresh_token", newRefreshToken); err == nil {
-				_ = atomicfile.WriteFile(filePath, updated)
-			}
-		}
+		updateAuthFile(filePath, func(data []byte) ([]byte, error) {
+			return sjson.SetBytes(data, "refresh_token", newRefreshToken)
+		})
 	}
 
 	am.triggerProjectIDProbe(email, newAccToken)
@@ -307,7 +312,7 @@ func ExchangeAuthCode(code string) (*Record, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "google-api-nodejs-client/9.15.1")
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +332,7 @@ func ExchangeAuthCode(code string) (*Record, error) {
 		return nil, err
 	}
 	uReq.Header.Set("Authorization", "Bearer "+accToken)
-	uResp, err := httpClient.Do(uReq)
+	uResp, err := httpClient().Do(uReq)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ package accounts
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Error kinds surfaced to the dashboard as Record.ErrorKind.
@@ -55,9 +56,7 @@ func ClassifyError(status int, text string) string {
 // the condition is expected to clear (zero if unknown).
 func (am *AccountManager) RecordAccountError(email string, status int, text string, until time.Time) {
 	kind := ClassifyError(status, text)
-	if len(text) > 300 {
-		text = text[:300]
-	}
+	text = truncateRunes(text, 300)
 	am.mu.Lock()
 	if acc, ok := am.accounts[email]; ok {
 		acc.ErrorKind = kind
@@ -100,4 +99,16 @@ func statusFromErr(err error) int {
 		}
 	}
 	return 0
+}
+
+// truncateRunes cuts s to at most max bytes without splitting a UTF-8 rune.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

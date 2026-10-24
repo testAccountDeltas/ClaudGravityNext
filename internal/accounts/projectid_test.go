@@ -39,9 +39,8 @@ func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 // the original on test cleanup.
 func withStubbedHTTPClient(t *testing.T, rt http.RoundTripper) {
 	t.Helper()
-	orig := httpClient
-	httpClient = &http.Client{Transport: rt}
-	t.Cleanup(func() { httpClient = orig })
+	restore := SetHTTPClientForTest(&http.Client{Transport: rt})
+	t.Cleanup(restore)
 }
 
 func waitForProbeToFinish(t *testing.T, email string) {

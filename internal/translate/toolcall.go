@@ -92,7 +92,7 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 		// declared list and 400s the WHOLE request otherwise.
 		argsPreview := argsRaw
 		if len(argsPreview) > 200 {
-			argsPreview = argsPreview[:200] + "..."
+			argsPreview = cutUTF8(argsPreview, 200) + "..."
 		}
 		// Deliberately NOT formatted as "[Called Name(args)]" — a real,
 		// observed incident (live traffic capture) showed the model

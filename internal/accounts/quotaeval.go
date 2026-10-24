@@ -49,7 +49,7 @@ func quotaBlockUntil(groups []QuotaGroup, now time.Time) time.Time {
 			continue
 		}
 		for _, b := range grp.Buckets {
-			if b.RemainingFraction > exhaustedFraction {
+			if b.FractionUnknown || b.RemainingFraction > exhaustedFraction {
 				continue
 			}
 			reset := parseResetTime(b.ResetTime)
@@ -86,11 +86,16 @@ func getEffectiveQuotaFraction(acc *Record) float64 {
 	// A bucket whose reset already passed counts as restored.
 	now := time.Now()
 	minFrac := 1.0
+	known := false
 	for _, grp := range acc.Quotas {
 		if isClaudeGroup(grp) {
 			continue
 		}
 		for _, b := range grp.Buckets {
+			if b.FractionUnknown {
+				continue
+			}
+			known = true
 			frac := b.RemainingFraction
 			if frac <= exhaustedFraction {
 				if t := parseResetTime(b.ResetTime); !t.IsZero() && now.After(t) {
@@ -101,6 +106,9 @@ func getEffectiveQuotaFraction(acc *Record) float64 {
 				minFrac = frac
 			}
 		}
+	}
+	if !known {
+		return 0.5 // no usable bucket: same neutral rank as "no quota data"
 	}
 	return minFrac
 }

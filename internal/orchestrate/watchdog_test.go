@@ -81,8 +81,57 @@ func TestIdleWatchdog_StopDoesNotHang(t *testing.T) {
 func TestIdleWatchdog_SeparateTimeouts_DefaultsChunkTimeout(t *testing.T) {
 	wd := startIdleWatchdog(context.Background(), 1, 0, 0, 0)
 	defer wd.Stop()
-	// Should initialize without error and default timeouts to safe positive values
-	if wd == nil {
-		t.Fatal("expected watchdog to be created")
+	if wd.ttftTimeout != 180*time.Second || wd.chunkTimeout != StreamingChunkTimeout ||
+		wd.maxDuration != 30*time.Minute {
+		t.Fatalf("defaults = ttft %v chunk %v max %v", wd.ttftTimeout, wd.chunkTimeout, wd.maxDuration)
+	}
+	if StreamingChunkTimeout != 180*time.Second {
+		t.Fatalf("StreamingChunkTimeout = %v", StreamingChunkTimeout)
+	}
+	explicit := startIdleWatchdog(context.Background(), 2, 7*time.Second, 9*time.Second, 11*time.Minute)
+	defer explicit.Stop()
+	if explicit.ttftTimeout != 7*time.Second || explicit.chunkTimeout != 9*time.Second || explicit.maxDuration != 11*time.Minute {
+		t.Fatalf("explicit values must be kept, got %v %v %v", explicit.ttftTimeout, explicit.chunkTimeout, explicit.maxDuration)
+	}
+}
+
+func TestIdleWatchdog_PhaseSwitchesFromTTFTToChunkOnFirstTouch(t *testing.T) {
+	wd := startIdleWatchdog(context.Background(), 1, 30*time.Second, 90*time.Second, time.Hour)
+	defer wd.Stop()
+	if lim, phase := wd.currentLimit(); lim != 30*time.Second || phase != "TTFT" {
+		t.Fatalf("before any bytes: %v %s", lim, phase)
+	}
+	wd.Touch()
+	if lim, phase := wd.currentLimit(); lim != 90*time.Second || phase != "inter-chunk" {
+		t.Fatalf("after the first bytes: %v %s", lim, phase)
+	}
+}
+
+func TestIdleWatchdog_TTFTLimitFiresBeforeFirstByte_ChunkLimitAfter(t *testing.T) {
+	old := watchdogTick
+	watchdogTick = time.Millisecond
+	t.Cleanup(func() { watchdogTick = old })
+
+	// Never touched: the short TTFT limit applies and fires.
+	cold := startIdleWatchdog(context.Background(), 1, 20*time.Millisecond, time.Hour, time.Hour)
+	defer cold.Stop()
+	select {
+	case <-cold.ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("TTFT limit never fired")
+	}
+
+	// Touched once: the (much longer) chunk limit applies, so the short TTFT
+	// limit must NOT fire; the watchdog is still alive after several ticks.
+	warm := startIdleWatchdog(context.Background(), 2, 20*time.Millisecond, time.Hour, time.Hour)
+	defer warm.Stop()
+	warm.Touch()
+	deadline := time.Now().Add(150 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		select {
+		case <-warm.ctx.Done():
+			t.Fatal("TTFT limit applied after the first byte arrived")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

@@ -85,7 +85,7 @@ func (am *AccountManager) WarmupSingleAccount(ctx context.Context, email string)
 		req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
 		req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
-		resp, err := httpClient.Do(req)
+		resp, err := httpClient().Do(req)
 		if err != nil {
 			lastErr = err
 			continue

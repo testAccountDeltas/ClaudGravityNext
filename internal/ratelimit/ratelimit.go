@@ -50,7 +50,7 @@ func IsNative3PModelExhausted(acc *accounts.Record) bool {
 			continue
 		}
 		for _, b := range g.Buckets {
-			if b.RemainingFraction > 0.05 {
+			if b.FractionUnknown || b.RemainingFraction > 0.05 {
 				return false
 			}
 		}
@@ -124,7 +124,7 @@ func pickFiveHourAndWeekly(acc *accounts.Record, modelName string) (fiveHour, we
 
 // bucketFraction returns 1-RemainingFraction clamped to [0,1], or 0 for nil.
 func bucketFraction(b *accounts.QuotaBucket) float64 {
-	if b == nil {
+	if b == nil || b.FractionUnknown {
 		return 0
 	}
 	f := 1.0 - b.RemainingFraction

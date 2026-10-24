@@ -115,7 +115,7 @@ func (am *AccountManager) FetchAvailableModels(forceRefresh bool) ([]AvailableMo
 	req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
 	req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do fetchAvailableModels: %w", err)
 	}

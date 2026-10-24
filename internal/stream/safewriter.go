@@ -184,12 +184,16 @@ func (s *SafeSSEWriter) IsReleased() bool {
 	return !s.holding
 }
 
+// minPingGap is the real silence required before a ping is written; a
+// package var only so tests can shrink it.
+var minPingGap = 4 * time.Second
+
 // SendKeepalivePing writes a ping frame, throttled to at most once every
 // 4 seconds of real silence — matches v1's own SendKeepalivePing.
 func (s *SafeSSEWriter) SendKeepalivePing() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.finished || time.Since(s.lastEventTime) < 4*time.Second {
+	if s.finished || time.Since(s.lastEventTime) < minPingGap {
 		return nil
 	}
 	// GAP-S1: a ping genuinely puts bytes on the wire — commitHeadersLocked

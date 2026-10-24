@@ -18,9 +18,15 @@ func modelKey(model string) string { return strings.ToLower(strings.TrimSpace(mo
 func (am *AccountManager) MarkAccountCooldown(email string, duration time.Duration) {
 	am.mu.Lock()
 	if acc, ok := am.accounts[email]; ok {
+		// Only ever extend: a short cooldown (10s refresh 429) landing after a
+		// long one (5-minute dead token, 403) must not shorten it.
 		until := time.Now().Add(duration)
-		acc.CooldownUntil = until
-		acc.hardCooldownUntil = until
+		if until.After(acc.CooldownUntil) {
+			acc.CooldownUntil = until
+		}
+		if until.After(acc.hardCooldownUntil) {
+			acc.hardCooldownUntil = until
+		}
 		logx.LogGateway("[AccountManager] Account %s put in cooldown for %v", email, duration)
 	}
 	am.mu.Unlock()

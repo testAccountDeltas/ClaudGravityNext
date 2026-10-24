@@ -92,7 +92,7 @@ hostLoop:
 			req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
 			req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
-			resp, err := httpClient.Do(req)
+			resp, err := httpClient().Do(req)
 			if err != nil {
 				lastErr = err
 				break // network failure on this host, try next host
@@ -139,13 +139,18 @@ hostLoop:
 				DisplayName       string  `json:"displayName"`
 				Window            string  `json:"window"`
 				ResetTime         string  `json:"resetTime"`
-				RemainingFraction float64 `json:"remainingFraction"`
+				RemainingFraction *float64 `json:"remainingFraction"`
 				Description       string  `json:"description"`
 			} `json:"buckets"`
 		} `json:"groups"`
 	}
 
 	if err := json.Unmarshal(respBytes, &parsed); err != nil {
+		// Malformed body: keep the previous snapshot and cooldowns untouched.
+		err = fmt.Errorf("quota response is not valid JSON: %w", err)
+		am.mu.Lock()
+		acc.LastError = err.Error()
+		am.mu.Unlock()
 		return err
 	}
 
@@ -153,14 +158,25 @@ hostLoop:
 	for _, g := range parsed.Groups {
 		var buckets []QuotaBucket
 		for _, b := range g.Buckets {
-			buckets = append(buckets, QuotaBucket{
-				BucketID:          b.BucketID,
-				DisplayName:       b.DisplayName,
-				Window:            b.Window,
-				ResetTime:         b.ResetTime,
-				RemainingFraction: b.RemainingFraction,
-				Description:       b.Description,
-			})
+			// Absent (or negative = garbage) fraction is "unknown", never 0:
+			// reading it as 0 cooled the whole account for 15 minutes. Values
+			// above 1 are clamped.
+			qb := QuotaBucket{
+				BucketID:    b.BucketID,
+				DisplayName: b.DisplayName,
+				Window:      b.Window,
+				ResetTime:   b.ResetTime,
+				Description: b.Description,
+			}
+			switch f := b.RemainingFraction; {
+			case f == nil || *f < 0:
+				qb.FractionUnknown = true
+			case *f > 1:
+				qb.RemainingFraction = 1
+			default:
+				qb.RemainingFraction = *f
+			}
+			buckets = append(buckets, qb)
 		}
 		groups = append(groups, QuotaGroup{
 			DisplayName: g.DisplayName,

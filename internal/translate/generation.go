@@ -5,14 +5,12 @@
 package translate
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
 	"claudgravity/internal/accounts"
-	"claudgravity/internal/logx"
 	"claudgravity/internal/schema"
 )
 
@@ -162,33 +160,13 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 			out, _ = sjson.Set(out, "generationConfig.topK", tk)
 		}
 	}
-	if stopSeqs := root.Get("stop_sequences"); stopSeqs.IsArray() {
-		// GAP-T7: an empty string or a duplicate stop sequence both fail
-		// the whole request with a 400 — filter both before the 5-entry
-		// cap below, so a client-side duplicate doesn't also crowd out a
-		// genuinely distinct 5th sequence.
-		seen := make(map[string]bool)
-		var seqs []string
-		for _, s := range stopSeqs.Array() {
-			v := s.String()
-			if v == "" || seen[v] {
-				continue
-			}
-			seen[v] = true
-			seqs = append(seqs, v)
-		}
-		// Google hard-caps generationConfig.stopSequences at 5 entries —
-		// anything past that fails the whole request with a 400
-		// INVALID_ARGUMENT instead of just ignoring the extras.
-		if len(seqs) > 5 {
-			logx.LogGateway("[Translate] client sent %d stop_sequences, truncating to Gemini's 5-entry limit (dropped: %v)", len(seqs), seqs[5:])
-			seqs = seqs[:5]
-		}
-		if len(seqs) > 0 {
-			seqsJSON, _ := json.Marshal(seqs)
-			out, _ = sjson.SetRaw(out, "generationConfig.stopSequences", string(seqsJSON))
-		}
-	}
+	// stop_sequences are deliberately NOT forwarded as
+	// generationConfig.stopSequences: Gemini cuts the text itself and
+	// reports a plain STOP, hiding that a sequence fired, so Anthropic's
+	// stop_reason="stop_sequence"/stop_sequence=<seq> could never be
+	// reported (and Google's 5-entry cap would apply). The gateway matches
+	// them over the text stream instead (internal/stream/stopseq.go,
+	// orchestrate/nonstreaming.go) and ends the turn on the first hit.
 
 	// Structured Outputs: translate Anthropic output_config.format into
 	// Gemini responseSchema. Some official SDK call shapes (e.g.

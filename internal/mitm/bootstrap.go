@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -51,6 +52,7 @@ var hopByHopHeaders = map[string]bool{
 func PassthroughToReal(w http.ResponseWriter, r *http.Request) {
 	target := *r.URL
 	target.Scheme = "https"
+	target.RawQuery = scrubQuery(target.RawQuery)
 	if isAnthropicHost(r.Host) {
 		target.Host = r.Host
 	} else {
@@ -64,8 +66,16 @@ func PassthroughToReal(w http.ResponseWriter, r *http.Request) {
 	// superrelay.log: "cannot rewind body after connection loss". Buffering
 	// it (these are passthrough API calls, not large file transfers) lets
 	// the transport retry transparently instead of surfacing a 502.
+	r.Body = http.MaxBytesReader(w, r.Body, MaxPassthroughBodyBytes)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"request_too_large","message":"Request body exceeds the maximum size"}}`))
+			return
+		}
 		http.Error(w, "proxy error", http.StatusBadGateway)
 		return
 	}
@@ -146,6 +156,10 @@ func PassthroughToReal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// MaxPassthroughBodyBytes caps a buffered passthrough request body; it
+// mirrors the 25MB limit /v1/messages enforces.
+const MaxPassthroughBodyBytes = 25 * 1024 * 1024
 
 var requestIDCounter uint64
 

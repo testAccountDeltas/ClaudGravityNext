@@ -35,15 +35,26 @@ func clearThinking(msgs []interface{}, e ThinkingEdit) (AppliedEdit, bool) {
 		mm := asMap(msgs[i])
 		blocks, _ := mm["content"].([]interface{})
 		kept := make([]interface{}, 0, len(blocks))
+		var cc interface{} // cache_control of a removed block
 		for _, b := range blocks {
 			if bm := asMap(b); bm != nil && isThinking(bm) {
 				freed += jsonTokens(bm)
+				if v, ok := bm["cache_control"]; ok {
+					cc = v
+				}
 				continue
 			}
 			kept = append(kept, b)
 		}
 		if len(kept) == 0 {
 			kept = append(kept, map[string]interface{}{"type": "text", "text": ThinkingPlaceholder})
+		}
+		// Keep the breakpoint count unchanged: a cache_control on a removed
+		// block moves to the last remaining block unless that has its own.
+		if last := asMap(kept[len(kept)-1]); cc != nil && last != nil {
+			if _, has := last["cache_control"]; !has {
+				last["cache_control"] = cc
+			}
 		}
 		mm["content"] = kept
 		cleared++
@@ -78,12 +89,16 @@ func clearToolUses(msgs []interface{}, e ToolUsesEdit, promptTokens int) (Applie
 			}
 			switch bm["type"] {
 			case "tool_use":
-				if id, _ := bm["id"].(string); id != "" {
+				// First occurrence of an id wins; a duplicate must not be
+				// counted (or cleared) twice.
+				if id, _ := bm["id"].(string); id != "" && pairs[id] == nil {
 					order = append(order, id)
 					pairs[id] = &toolPair{use: bm}
 				}
 			case "tool_result":
-				if id, _ := bm["tool_use_id"].(string); pairs[id] != nil {
+				if id, _ := bm["tool_use_id"].(string); pairs[id] != nil && pairs[id].result == nil {
+					// A result seen before its tool_use never matches (the
+					// pair does not exist yet), so orphans stay untouched.
 					pairs[id].result = bm
 				}
 			}

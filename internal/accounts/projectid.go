@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
-	"claudgravity/internal/atomicfile"
 	"claudgravity/internal/logx"
 )
 
@@ -99,22 +97,13 @@ func (am *AccountManager) triggerProjectIDProbe(email, accessToken string) {
 // than the live *Record so callers can do this disk I/O without holding
 // am.mu.
 func persistAccountFields(filePath, projectID string, probed bool) {
-	if filePath == "" {
-		return
-	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return
-	}
-	updated, err := sjson.SetBytes(data, "project_id", projectID)
-	if err != nil {
-		return
-	}
-	updated, err = sjson.SetBytes(updated, "project_id_probed", probed)
-	if err != nil {
-		return
-	}
-	_ = atomicfile.WriteFile(filePath, updated)
+	updateAuthFile(filePath, func(data []byte) ([]byte, error) {
+		updated, err := sjson.SetBytes(data, "project_id", projectID)
+		if err != nil {
+			return nil, err
+		}
+		return sjson.SetBytes(updated, "project_id_probed", probed)
+	})
 }
 
 // discoverAntigravityProjectID retrieves the account's real GCP project id via
@@ -132,7 +121,7 @@ func discoverAntigravityProjectID(ctx context.Context, accessToken string) (stri
 	req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
 	req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("loadCodeAssist: %w", err)
 	}
@@ -182,7 +171,7 @@ func onboardAntigravityUser(ctx context.Context, accessToken, tierID string) (st
 		req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
 		req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
-		resp, err := httpClient.Do(req)
+		resp, err := httpClient().Do(req)
 		if err != nil {
 			return "", fmt.Errorf("onboardUser: %w", err)
 		}

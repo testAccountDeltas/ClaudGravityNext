@@ -71,6 +71,10 @@ func RegisterDashboardRoutes(mux *http.ServeMux, cfgMgr *config.ConfigManager) {
 	mux.HandleFunc("/dashboard", requireDashboardAuth(cfgMgr, handleDashboard))
 	mux.HandleFunc("/dashboard/", requireDashboardAuth(cfgMgr, handleDashboard))
 	mux.Handle("/ws", requireDashboardAuth(cfgMgr, func(w http.ResponseWriter, r *http.Request) {
+		if !sameOriginOrNone(r) {
+			http.Error(w, "Forbidden: cross-origin WebSocket upgrade", http.StatusForbidden)
+			return
+		}
 		websocket.Handler(HandleWS).ServeHTTP(w, r)
 	}))
 	mux.HandleFunc("/api/accounts", requireDashboardAuth(cfgMgr, handleAPIAccounts))

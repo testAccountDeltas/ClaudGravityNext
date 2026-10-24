@@ -202,8 +202,11 @@ func (as *AccountSelector) selectLocked(apiKey string, conversationKey string, t
 			}
 		}
 		if len(valid) > 0 {
-			as.roundRobinIdx = (as.roundRobinIdx + 1) % len(valid)
-			return valid[as.roundRobinIdx], nil
+			// Index first, then advance: bumping first skipped valid[0] on
+			// the very first pick.
+			pick := valid[as.roundRobinIdx%len(valid)]
+			as.roundRobinIdx++
+			return pick, nil
 		}
 	}
 
@@ -253,8 +256,8 @@ func (as *AccountSelector) selectLocked(apiKey string, conversationKey string, t
 		return nil, fmt.Errorf("all accounts are disabled, cooling down or excluded")
 	}
 
-	as.roundRobinIdx = (as.roundRobinIdx + 1) % len(valid)
-	chosen := valid[as.roundRobinIdx]
+	chosen := valid[as.roundRobinIdx%len(valid)]
+	as.roundRobinIdx++
 	return chosen, nil
 }
 

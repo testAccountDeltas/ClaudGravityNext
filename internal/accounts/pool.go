@@ -32,16 +32,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
-	"claudgravity/internal/atomicfile"
 	"claudgravity/internal/config"
 	"claudgravity/internal/logx"
 	"claudgravity/internal/tlsfingerprint"
@@ -51,15 +48,21 @@ import (
 // file's doc comment for why it's a legitimate, dedicated dependency on
 // internal/tlsfingerprint rather than a shared global reached across
 // package boundaries.
-var httpClient = &http.Client{
-	Transport: tlsfingerprint.NewFingerprintedRoundTripper(),
+// httpClient holds the Google-facing client. It is an atomic pointer because
+// background goroutines (project-id probe, quota refresh) read it while
+// tests swap it through SetHTTPClientForTest.
+var httpClientPtr atomic.Pointer[http.Client]
+
+func init() {
+	httpClientPtr.Store(&http.Client{Transport: tlsfingerprint.NewFingerprintedRoundTripper()})
 }
 
-// SetHTTPClientForTest temporarily overrides the package-level httpClient for testing.
+func httpClient() *http.Client { return httpClientPtr.Load() }
+
+// SetHTTPClientForTest temporarily overrides the Google-facing client for testing.
 func SetHTTPClientForTest(c *http.Client) func() {
-	orig := httpClient
-	httpClient = c
-	return func() { httpClient = orig }
+	orig := httpClientPtr.Swap(c)
+	return func() { httpClientPtr.Store(orig) }
 }
 
 const fallbackProjectID = "aicode-consumers"
@@ -70,7 +73,12 @@ type QuotaBucket struct {
 	Window            string  `json:"window"`
 	ResetTime         string  `json:"reset_time"`
 	RemainingFraction float64 `json:"remaining_fraction"`
-	Description       string  `json:"description"`
+	// FractionUnknown: upstream sent no (or an unusable) remainingFraction.
+	// Such a bucket is NOT exhausted - absence is not zero - and is skipped by
+	// every exhaustion/ranking decision. Zero value (false) keeps the
+	// historical meaning of RemainingFraction for hand-built buckets.
+	FractionUnknown bool   `json:"fraction_unknown,omitempty"`
+	Description     string `json:"description"`
 }
 
 type QuotaGroup struct {
@@ -175,52 +183,6 @@ func InitAccountManager(authDir string, cfg config.ServerConfig) error {
 	}
 	globalAccountManager.authDir = authDir
 	return globalAccountManager.LoadAll()
-}
-
-func (am *AccountManager) LoadAll() error {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-
-	_ = os.MkdirAll(am.authDir, 0755)
-
-	err := filepath.Walk(am.authDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".json") || strings.HasPrefix(info.Name(), ".") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		email := gjson.GetBytes(data, "email").String()
-		if email == "" {
-			return nil
-		}
-
-		refToken := gjson.GetBytes(data, "refresh_token").String()
-		accToken := gjson.GetBytes(data, "access_token").String()
-		projectID := gjson.GetBytes(data, "project_id").String()
-		projectIDProbed := gjson.GetBytes(data, "project_id_probed").Bool()
-		disabled := gjson.GetBytes(data, "disabled").Bool()
-
-		if projectID == "" {
-			projectID = fallbackProjectID
-		}
-
-		acc := &Record{
-			Email:           email,
-			ProjectID:       projectID,
-			ProjectIDProbed: projectIDProbed,
-			RefreshToken:    refToken,
-			AccessToken:     accToken,
-			Disabled:        disabled,
-			FilePath:        path,
-		}
-		am.accounts[email] = acc
-		return nil
-	})
-
-	return err
 }
 
 // snapshot copies the fields callers outside this package actually read
@@ -354,14 +316,9 @@ func (am *AccountManager) ToggleAccountDisabled(email string, disabled bool) err
 	filePath := acc.FilePath
 	am.mu.Unlock()
 
-	if filePath != "" {
-		data, err := os.ReadFile(filePath)
-		if err == nil {
-			if updated, err := sjson.SetBytes(data, "disabled", disabled); err == nil {
-				_ = atomicfile.WriteFile(filePath, updated)
-			}
-		}
-	}
+	updateAuthFile(filePath, func(data []byte) ([]byte, error) {
+		return sjson.SetBytes(data, "disabled", disabled)
+	})
 
 	if disabled {
 		globalSelector.UnstickAccount(email)

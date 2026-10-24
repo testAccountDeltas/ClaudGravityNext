@@ -1,7 +1,9 @@
 package mitm
 
 import (
+	"encoding/base64"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 )
@@ -52,17 +54,55 @@ func scrubCredentialHeaders(h http.Header, anthropicHost bool) {
 			h.Del(name)
 			continue
 		}
+		var keep []string
 		for _, v := range vals {
-			tok := v
-			if len(tok) > 7 && strings.EqualFold(tok[:7], "bearer ") {
-				tok = tok[7:]
-			}
-			if isGatewaySecret(tok) || (name == "Cookie" && cookieHasSecret(v)) {
-				h.Del(name)
-				break
+			if !valueHasSecret(name, v) {
+				keep = append(keep, v)
 			}
 		}
+		if len(keep) == len(vals) {
+			continue
+		}
+		h.Del(name)
+		for _, v := range keep {
+			h.Add(name, v)
+		}
 	}
+}
+
+// valueHasSecret reports whether a single header value carries a gateway
+// secret in any supported encoding: raw, Bearer/Basic scheme (scheme is
+// case-insensitive; Basic is base64 "user:pass" where either half may be
+// the secret), or a cookie pair.
+func valueHasSecret(name, v string) bool {
+	v = strings.TrimSpace(v)
+	if isGatewaySecret(v) {
+		return true
+	}
+	if name == "Cookie" {
+		return cookieHasSecret(v)
+	}
+	if sp := strings.IndexAny(v, " 	"); sp > 0 {
+		scheme, rest := strings.ToLower(v[:sp]), strings.TrimSpace(v[sp+1:])
+		switch scheme {
+		case "bearer":
+			return isGatewaySecret(rest)
+		case "basic":
+			dec, err := base64.StdEncoding.DecodeString(rest)
+			if err != nil {
+				dec, err = base64.RawStdEncoding.DecodeString(rest)
+			}
+			if err != nil {
+				return false
+			}
+			if isGatewaySecret(string(dec)) {
+				return true
+			}
+			user, pass, _ := strings.Cut(string(dec), ":")
+			return isGatewaySecret(user) || isGatewaySecret(pass)
+		}
+	}
+	return false
 }
 
 func cookieHasSecret(cookie string) bool {
@@ -72,4 +112,42 @@ func cookieHasSecret(cookie string) bool {
 		}
 	}
 	return false
+}
+
+// scrubQuery drops query parameters (any name) whose value is a gateway
+// secret, e.g. ?key=<tenant key>. Returns the cleaned raw query.
+func scrubQuery(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	q, err := url.ParseQuery(raw)
+	if err != nil {
+		// Unparseable: drop it entirely if it mentions a secret.
+		for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == '&' || r == ';' }) {
+			if _, v, ok := strings.Cut(part, "="); ok && isGatewaySecret(v) {
+				return ""
+			}
+		}
+		return raw
+	}
+	changed := false
+	for k, vs := range q {
+		var keep []string
+		for _, v := range vs {
+			if isGatewaySecret(v) {
+				changed = true
+				continue
+			}
+			keep = append(keep, v)
+		}
+		if len(keep) == 0 {
+			delete(q, k)
+		} else {
+			q[k] = keep
+		}
+	}
+	if !changed {
+		return raw
+	}
+	return q.Encode()
 }

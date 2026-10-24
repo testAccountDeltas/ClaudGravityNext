@@ -4,9 +4,23 @@ import (
 	"testing"
 )
 
+// isolate removes the given session keys now and again when the test ends,
+// so -count>1 and -shuffle never see a previous run's signatures.
+func isolate(t *testing.T, ids ...string) {
+	t.Helper()
+	clean := func() {
+		for _, id := range ids {
+			sessionSignatures.Delete(id)
+		}
+	}
+	clean()
+	t.Cleanup(clean)
+}
+
 func TestSubagentWithColonsInSessionID(t *testing.T) {
 	parentSession := "tenantPrefix:sess_parent_123"
 	subagentA := parentSession + ":sub_explore_1"
+	isolate(t, parentSession, subagentA)
 
 	SetSessionSignature(parentSession, "sig_parent")
 
@@ -19,6 +33,7 @@ func TestSubagentSignatureIsolationAndFallback(t *testing.T) {
 	parentSession := "sess_parent_123"
 	subagentA := parentSession + ":sub_explore_1"
 	subagentB := parentSession + ":sub_explore_2"
+	isolate(t, parentSession, subagentA, subagentB)
 
 	// 1. Parent session records a signature
 	SetSessionSignature(parentSession, "sig_parent")

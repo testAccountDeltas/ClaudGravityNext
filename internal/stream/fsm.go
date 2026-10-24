@@ -7,6 +7,7 @@ package stream
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -115,6 +116,7 @@ type FSM struct {
 	stopSequences          []string
 	textHoldBuffer         string
 	maxStopLen             int
+	stopMatched            string // the client stop_sequence the gateway itself found in the text (stopseq.go); "" = none
 
 	prefillText         string
 	prefillEmitted      bool
@@ -300,7 +302,16 @@ func (f *FSM) HandleText(text string) error {
 		return nil
 	}
 	f.lastText += text
+	prefillPending := !f.prefillEmitted && f.prefillText != ""
 	text = f.ApplyPrefill(text)
+	if prefillPending && f.maxStopLen > 0 && strings.HasPrefix(text, f.prefillText) {
+		// The client's own prefill is not generated text: emit it now so
+		// stop_sequences are only ever matched against what the model wrote.
+		if err := f.emitTextDelta(f.prefillText); err != nil {
+			return err
+		}
+		text = text[len(f.prefillText):]
+	}
 	text = sanitize.StripSyntheticXMLTags(text)
 	if loopguard.HasIgnoreLoopTag(text) {
 		text = loopguard.StripIgnoreLoopTag(text)
@@ -315,7 +326,31 @@ func (f *FSM) HandleText(text string) error {
 	f.textHoldBuffer += text
 	f.textHoldBuffer = sanitize.StripSyntheticXMLTags(f.textHoldBuffer)
 
+	// Stop sequences are matched here, over everything not yet emitted:
+	// the hold-back keeps at least maxStopLen-1 trailing bytes, so a
+	// sequence split across chunks (or sitting mid-chunk) is always seen
+	// whole. The earliest match wins; text before it is emitted, the match
+	// and everything after it is dropped. Gemini is NOT sent the sequences
+	// (translate/generation.go), so this is the only place they fire.
+	if idx, seq := f.findStopSequence(f.textHoldBuffer); seq != "" {
+		before := f.textHoldBuffer[:idx]
+		f.textHoldBuffer = ""
+		f.stopMatched = seq
+		if err := f.emitTextDelta(before); err != nil {
+			return err
+		}
+		if f.capReached {
+			// The cap was spent before the sequence was reached: cap wins.
+			f.stopMatched = ""
+			return f.FinishStream("MAX_TOKENS")
+		}
+		return f.FinishStream("STOP")
+	}
+
 	holdLen := f.maxStopLen
+	if f.maxStopLen > 0 {
+		holdLen = f.maxStopLen - 1 // a full sequence is matched above, so only a proper prefix can still be pending
+	}
 	if partialTag := sanitize.PartialSyntheticTagSuffix(f.textHoldBuffer); partialTag != "" {
 		if len(partialTag) > holdLen {
 			holdLen = len(partialTag)
