@@ -327,6 +327,10 @@ func repairEditToolCallCore(toolName string, argsRaw string, sessionID string) (
 
 	// 5. Advanced Whitespace-Insensitive & Tab Matching (Line-by-line Sliding Window)
 	repairedExact, lineIndents, fileLine0Indent, ok := findFuzzyLineMatch(fileContent, oldStr)
+	if ok && repairedExact != "" && newStrKey != "" && indentRepairAmbiguous(newStr, lineIndents, fileLine0Indent, oldStr) {
+		logx.LogGateway("[Auto-Repair Edit] Refused ambiguous indentation repair for %s; leaving old_string as sent so Edit fails and the model retries", filepath.Base(resolvedPath))
+		return argsRaw, catNCleaned
+	}
 	if ok && repairedExact != "" {
 		repaired, err := sjson.Set(argsRaw, oldStrKey, repairedExact)
 		if err == nil {

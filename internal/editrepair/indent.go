@@ -278,12 +278,12 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 				originalOwnIndent[j] = l[:len(l)-len(strings.TrimLeft(l, " \t"))]
 			}
 			anchorOwnIndent := origLine0OwnIndent
-			if origLine0OwnIndent == "" && fileLine0Indent != "" {
+			if origLine0OwnIndent == "" {
 				// The model quoted line 0 without its indentation; its frame for
 				// that line is whatever the first matched line shows (own = real
 				// + extra), not "none".
 				for j := 1; j < len(lines); j++ {
-					if assigned[j] && assignedIndent[j] != "" && strings.HasPrefix(originalOwnIndent[j], assignedIndent[j]) {
+					if assigned[j] && strings.HasPrefix(originalOwnIndent[j], assignedIndent[j]) {
 						anchorOwnIndent = fileLine0Indent + originalOwnIndent[j][len(assignedIndent[j]):]
 						break
 					}

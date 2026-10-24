@@ -48,6 +48,9 @@ func runProperty(t *testing.T, seed int64, cases int, unit string, d distortion)
 		if len(edited) == 0 || edited[0].text == "" || edited[len(edited)-1].text == "" {
 			continue
 		}
+		if d.skipOneLine && len(block) == 1 {
+			continue
+		}
 		if d.skipLine0Edit && edited[0] != block[0] {
 			continue
 		}
@@ -112,7 +115,7 @@ func TestPropertyRepairNeverCorrupts(t *testing.T) {
 			}
 			res, bad := runProperty(t, 20261025, cases, unit, d)
 			summary = append(summary, fmt.Sprintf("unit=%-6q %-28s ok=%-4d refused=%-4d CORRUPT=%d", unit, d.name, res.ok, res.nomatch, res.corrupt))
-			if res.corrupt > 0 && !d.informational {
+			if res.corrupt > 0 {
 				t.Errorf("unit=%q distortion=%s: %d corrupting repairs; first:\n%s", unit, d.name, res.corrupt, strings.Join(bad[:1], "\n"))
 			}
 		}

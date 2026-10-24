@@ -105,7 +105,7 @@ type distortion struct {
 	needsStyle    bool   // skip files with no indentation: their style is unknowable
 	onlyUnit      string // restrict to files indented with this unit ("" = any)
 	skipLine0Edit bool   // skip edits that change or drop the block's first line
-	informational bool   // report only; ambiguous by construction
+	skipOneLine   bool   // skip one-line blocks: they match exactly, so nothing is repaired
 
 	crlfFile bool   // the file uses CRLF while the model quotes with LF
 	suffix   string // the model's old/new end with this (e.g. a newline)
@@ -132,7 +132,7 @@ func distortions(fileUnit string) []distortion {
 		{name: "extra-tab+trailing-newline", onlyUnit: "\t", suffix: "\n", apply: func(s string) string { return "\t" + s }},
 		{name: "first-line-unindented", skipLine0Edit: true, apply: func(s string) string { return s },
 			first: func(s string) string { _, t := leading(s); return t }},
-		{name: "extra-tab+first-unindented", onlyUnit: "\t", informational: true, apply: func(s string) string { return "\t" + s },
+		{name: "extra-tab+first-unindented", onlyUnit: "\t", skipOneLine: true, apply: func(s string) string { return "\t" + s },
 			first: func(s string) string { _, t := leading(s); return t }},
 	}
 }
