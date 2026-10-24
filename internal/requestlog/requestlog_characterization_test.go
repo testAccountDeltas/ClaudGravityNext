@@ -21,9 +21,12 @@ func newTestStore(t *testing.T) *SQLiteLogStore {
 	return globalLogStore
 }
 
-func TestMaskKey_ShortKeyUnmasked(t *testing.T) {
-	if got := MaskKey("short"); got != "short" {
-		t.Fatalf("keys <=14 chars must pass through unmasked, got %q", got)
+func TestMaskKey_ShortKeysNeverVerbatim(t *testing.T) {
+	cases := map[string]string{"": "***", "short": "***", "sk-12345": "sk...", "abcdefghijklmn": "ab..."}
+	for in, want := range cases {
+		if got := MaskKey(in); got != want {
+			t.Fatalf("MaskKey(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

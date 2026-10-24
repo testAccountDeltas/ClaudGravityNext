@@ -47,14 +47,24 @@ func handleAPIKeys(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http.
 	if r.Method == http.MethodDelete {
 		key := r.URL.Query().Get("key")
 		deleted := false
+		var maskMatches []string
 		for k := range cfgMgr.GetAllTenants() {
-			if k == key || requestlog.MaskKey(k) == key {
+			if k == key {
 				_ = cfgMgr.DeleteAPIKey(k)
 				deleted = true
 				break
 			}
+			if requestlog.MaskKey(k) == key {
+				maskMatches = append(maskMatches, k)
+			}
 		}
-		if !deleted {
+		// Short keys mask to a shared form; delete by mask only when it is
+		// unambiguous, never an arbitrary one of several.
+		if !deleted && len(maskMatches) == 1 {
+			_ = cfgMgr.DeleteAPIKey(maskMatches[0])
+			deleted = true
+		}
+		if !deleted && len(maskMatches) == 0 {
 			_ = cfgMgr.DeleteAPIKey(key)
 		}
 		w.Header().Set("Content-Type", "application/json")
