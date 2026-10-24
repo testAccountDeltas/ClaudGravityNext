@@ -15,6 +15,11 @@ import "strings"
 // that preserved prefix, but nothing should be prepended here.
 const stripOnlyIndentMarker = "\x00strip-only\x00"
 
+// columnZeroMarker is what findFuzzyLineMatch stores in lineIndents[j] when the
+// file's real indentation of that line is EMPTY but old_string's own was not
+// (over-indented): a bare "" there means "matched, leave alone" instead.
+const columnZeroMarker = "\x00col0\x00"
+
 // reapplyLineIndents prepends lineIndents[j] onto newStr's line j, for every
 // j where lineIndents[j] is non-empty and that line doesn't already start
 // with whitespace (the model may have gotten SOME of its new lines right).
@@ -27,9 +32,21 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 	if strings.TrimSpace(newStr) == "" {
 		return newStr, false
 	}
+	// Split the column-0 marker out into its own flag so every branch below can
+	// tell "real indent is empty" apart from "nothing to correct".
+	zero := make([]bool, len(lineIndents))
+	plain := make([]string, len(lineIndents))
+	for j, ind := range lineIndents {
+		if ind == columnZeroMarker {
+			zero[j] = true
+		} else {
+			plain[j] = ind
+		}
+	}
+	lineIndents = plain
 	hasAny := false
-	for _, ind := range lineIndents {
-		if ind != "" {
+	for j, ind := range lineIndents {
+		if ind != "" || zero[j] {
 			hasAny = true
 			break
 		}
@@ -83,6 +100,11 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 			lines[0] = trimmed
 			changed = true
 		}
+	} else if len(lineIndents) > 0 && zero[0] {
+		if trimmed := strings.TrimLeft(lines[0], " 	"); trimmed != lines[0] {
+			lines[0] = trimmed
+			changed = true
+		}
 	} else if len(lineIndents) > 0 && lineIndents[0] != "" {
 		trimmed := strings.TrimLeft(lines[0], " \t")
 		if lineIndents[0]+trimmed != lines[0] {
@@ -107,7 +129,7 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 		// mirrored its own space-indented old_string against a
 		// tab-indented file).
 		for j, ind := range lineIndents {
-			if ind == "" || j == 0 {
+			if (ind == "" && !zero[j]) || j == 0 {
 				continue // line 0 already handled above
 			}
 			// GAP-ED-01: a genuinely empty line (lines[j]=="") got
@@ -154,7 +176,7 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 				baseIndent = ind
 			}
 		}
-		if len(lineIndents) == 1 && fileLine0Indent != "" {
+		if len(lineIndents) == 1 && (fileLine0Indent != "" || zero[0]) {
 			// old_string was a single line, so there's no real lines-1..N
 			// detected indentation at all to pick a baseIndent from
 			// (counts is necessarily empty) — this is the ONLY case
@@ -238,7 +260,7 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 						continue
 					}
 					realIndent := lineIndents[k]
-					if realIndent == "" {
+					if realIndent == "" && !zero[k] {
 						// Nothing was missing for this old line, meaning
 						// its own leading whitespace already equals the
 						// file's — that own whitespace IS the real indent.
@@ -296,7 +318,11 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 				switch {
 				case assigned[j]:
 					target = assignedIndent[j] + trimmed
-				case anchorRealIndent != "":
+				// An empty anchorRealIndent is a REAL answer (column 0, e.g. the closing
+				// "}" of a top-level func), not "unknown": guarding on it made every
+				// inserted line after such an anchor drop its own indentation and take
+				// the flat baseIndent, flattening whole inserted functions.
+				default:
 					if strings.HasPrefix(originalOwnIndent[j], anchorOwnIndent) {
 						delta := originalOwnIndent[j][len(anchorOwnIndent):]
 						// Normalize delta style to match anchorRealIndent (prevent mixing tabs and spaces)
@@ -324,10 +350,6 @@ func reapplyLineIndents(newStr string, lineIndents []string, fileLine0Indent str
 					} else {
 						target = anchorRealIndent + trimmed
 					}
-				case baseIndent != "":
-					target = baseIndent + trimmed
-				default:
-					target = anchorRealIndent + trimmed
 				}
 				if target == lines[j] {
 					continue // already correct

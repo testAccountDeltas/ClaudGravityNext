@@ -168,6 +168,11 @@ func findFuzzyLineMatch(fileContent, oldStr string) (string, []string, string, b
 				continue
 			}
 			lineIndents[j] = fileIndent
+			if fileIndent == "" {
+				// "" already means "line matched, nothing to fix"; a real column-0
+				// line that old_string over-indented needs its own marker.
+				lineIndents[j] = columnZeroMarker
+			}
 		}
 		// Captured unconditionally (unlike lineIndents[0], which stays ""
 		// when old_string's line 0 already matched) so the caller has the
