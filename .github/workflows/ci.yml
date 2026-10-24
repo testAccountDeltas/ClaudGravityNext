@@ -1,0 +1,25 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build and vet
+        run: go build ./... && go vet ./...
+      - name: tests (shuffled, repeated)
+        run: go test -shuffle=on -count=2 ./...
+      - name: tests with the race detector
+        run: go test -race ./...
+      - name: fuzz smoke
+        run: |
+          for pkg in $(grep -rl "^func Fuzz" --include=*_test.go . | xargs -n1 dirname | sort -u); do
+            for f in $(grep -h "^func Fuzz" $pkg/*_test.go | sed 's/func \(Fuzz[A-Za-z0-9_]*\).*/\1/'); do
+              go test $pkg -run '^$' -fuzz "^$f\$" -fuzztime 20s
+            done
+          done
