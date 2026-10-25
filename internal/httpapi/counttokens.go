@@ -21,11 +21,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// HandleCountTokens is exported for mounting directly on topMux / custom routes.
-func HandleCountTokens(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http.Request) {
-	handleCountTokens(cfgMgr, w, r)
-}
-
 func handleCountTokens(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
