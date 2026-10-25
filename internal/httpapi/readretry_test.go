@@ -21,14 +21,12 @@ func refusedRead(input, result string) string {
 const tokenRefusal = `"File content (34972 tokens) exceeds maximum allowed tokens (25000). Use offset and limit"`
 const sizeRefusal = `"File content (371.4KB) exceeds maximum allowed size (256KB). Use offset and limit"`
 
-func TestReadRetryCall_HalvesTheWindowOrPicksADefault(t *testing.T) {
+func TestReadRetryCall_HalvesTheWindow(t *testing.T) {
 	for name, c := range map[string]struct {
 		input, result string
 		wantLimit     int64
 	}{
 		"had a limit":         {`{"file_path":"/f.md","offset":10,"limit":800}`, tokenRefusal, 400},
-		"no limit, tokens":    {`{"file_path":"/f.md"}`, tokenRefusal, readRetryDefaultLimit},
-		"no limit, size":      {`{"file_path":"/f.md"}`, sizeRefusal, readRetryDefaultLimit},
 		"allow_large dropped": {`{"file_path":"/f.md","limit":200,"allow_large":true}`, tokenRefusal, 100},
 	} {
 		_, in, ok := readRetryCall([]byte(refusedRead(c.input, c.result)))
@@ -47,6 +45,9 @@ func TestReadRetryCall_HalvesTheWindowOrPicksADefault(t *testing.T) {
 
 func TestReadRetryCall_LeavesEverythingElseToTheModel(t *testing.T) {
 	ok := func(js string) bool { _, _, ok := readRetryCall([]byte(js)); return ok }
+	if ok(refusedRead(`{"file_path":"/f.md"}`, sizeRefusal)) || ok(refusedRead(`{"file_path":"/f.md"}`, tokenRefusal)) {
+		t.Error("a Read without a limit is the model's call: outline, tail or window")
+	}
 	if ok(refusedRead(`{"file_path":"/f","limit":100}`, tokenRefusal)) {
 		t.Error("the window is already small: let the model decide")
 	}

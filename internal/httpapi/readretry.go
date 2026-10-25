@@ -6,7 +6,8 @@
 // and re-issue Read with a window — a wasted turn that also pollutes the
 // conversation. The gateway sees that refusal as the tail of the next
 // request, so instead of paying a model call to retry, it answers with the
-// retry itself: the same Read with a smaller window. The model is not called.
+// retry itself: the same Read with a window half as large. The model is not called.
+// Only a Read that already had a limit is healed.
 package httpapi
 
 import (
@@ -22,13 +23,9 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const (
-	// readRetryDefaultLimit is the window for a Read that had no limit.
-	readRetryDefaultLimit = 400
-	// readRetryMinLimit stops the halving: below this a retry will not help and
-	// the model should see the error and decide for itself.
-	readRetryMinLimit = 60
-)
+// readRetryMinLimit stops the halving: below this a retry will not help and
+// the model should see the error and decide for itself.
+const readRetryMinLimit = 60
 
 // readRetryCall inspects bodyBytes and, when the newest user message carries
 // a "too large" refusal for a Read call of the previous assistant message,
@@ -66,11 +63,15 @@ func readRetryCall(bodyBytes []byte) (toolName, inputJSON string, ok bool) {
 	if !declaresTool(bodyBytes, call.Get("name").String()) {
 		return "", "", false
 	}
+	// A refusal of a Read WITHOUT a limit is left to the model: the file is
+	// huge, and which part is worth reading (the outline, the newest entries
+	// at the end, one symbol) is its decision; a blind first-N-lines retry
+	// would just waste a turn on the least useful part.
 	limit := call.Get("input.limit").Int()
-	next := int64(readRetryDefaultLimit)
-	if limit > 0 {
-		next = limit / 2
+	if limit <= 0 {
+		return "", "", false
 	}
+	next := limit / 2
 	if next < readRetryMinLimit {
 		return "", "", false
 	}
