@@ -118,11 +118,9 @@ func convertImageDocumentBlock(ptype string, p gjson.Result, role string) []stri
 		}
 	case "url":
 		if u := src.Get("url").String(); u != "" {
-			if role == "assistant" {
-				part := `{"text":""}`
-				part, _ = sjson.Set(part, "text", "[Assistant output "+ptype+" by URL: "+u+"]")
-				parts = append(parts, part)
-			} else if part, isBinary, text, ok := fetchAttachmentFromURL(ptype, u, p.Get("title").String()); ok {
+			// (An assistant-role url source never gets here: the peek at the
+			// top already replaced it with a placeholder.)
+			if part, isBinary, text, ok := fetchAttachmentFromURL(ptype, u, p.Get("title").String()); ok {
 				if isBinary {
 					parts = append(parts, part)
 				} else {
