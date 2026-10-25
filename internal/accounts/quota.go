@@ -205,8 +205,8 @@ hostLoop:
 	acc.LastError = ""
 	am.mu.Unlock()
 
-	if broadcaster != nil {
-		broadcaster.BroadcastAccounts(am.GetAccounts())
+	if b := currentBroadcaster(); b != nil {
+		b.BroadcastAccounts(am.GetAccounts())
 	}
 
 	return nil

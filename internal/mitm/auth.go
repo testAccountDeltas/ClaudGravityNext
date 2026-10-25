@@ -49,8 +49,3 @@ func ProxyAuthOK(r *http.Request, secret string) bool {
 	}
 	return false
 }
-
-// proxyAuthOK is kept for backwards compatibility within the mitm package.
-func proxyAuthOK(r *http.Request, secret string) bool {
-	return ProxyAuthOK(r, secret)
-}

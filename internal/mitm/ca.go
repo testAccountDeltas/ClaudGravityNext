@@ -1,7 +1,7 @@
 // Package mitm is a port of superrelay (v1)'s mitm.go, split across six
 // files by responsibility per
 // ARCHITECTURE_V2_SPECIFICATION_AND_MIGRATION_PLAN.md Part 4.3: ca.go
-// (this file — MitmCA + bufferedConn), auth.go (proxyAuthOK), tunnel.go
+// (this file — MitmCA + bufferedConn), auth.go (ProxyAuthOK), tunnel.go
 // (isAnthropicHost/the SSRF subnet checks/HandleConnectTunnel), relay.go
 // (idleCopy/serveInterceptedTLS), responsewriter.go (MitmResponseWriter),
 // bootstrap.go (HandleBootstrapSpoof/PassthroughToReal).

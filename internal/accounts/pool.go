@@ -158,13 +158,26 @@ type Broadcaster interface {
 	BroadcastAccounts(accounts []*Record)
 }
 
-var broadcaster Broadcaster
+var (
+	broadcasterMu sync.RWMutex
+	broadcaster   Broadcaster
+)
 
 // SetBroadcaster wires a dashboard (or any other) subscriber in. Safe to
 // leave unset — DeleteAccount/ToggleAccountDisabled simply skip
 // broadcasting, as nothing in this package or its tests requires a
 // dashboard to exist.
-func SetBroadcaster(b Broadcaster) { broadcaster = b }
+func SetBroadcaster(b Broadcaster) {
+	broadcasterMu.Lock()
+	broadcaster = b
+	broadcasterMu.Unlock()
+}
+
+func currentBroadcaster() Broadcaster {
+	broadcasterMu.RLock()
+	defer broadcasterMu.RUnlock()
+	return broadcaster
+}
 
 // InitAccountManager loads the account pool from authDir and applies any
 // OAuth overrides from cfg. See this file's doc comment item 1 above —
@@ -294,9 +307,9 @@ func (am *AccountManager) DeleteAccount(email string) error {
 	// Remove from sticky/affinity tables
 	globalSelector.UnstickAccount(email)
 
-	if broadcaster != nil {
-		broadcaster.BroadcastAccountDeleted(email)
-		broadcaster.BroadcastAccounts(am.GetAccounts())
+	if b := currentBroadcaster(); b != nil {
+		b.BroadcastAccountDeleted(email)
+		b.BroadcastAccounts(am.GetAccounts())
 	}
 
 	logx.LogGateway("[AccountManager] Account deleted: %s (file: %s)", email, filePath)
@@ -324,8 +337,8 @@ func (am *AccountManager) ToggleAccountDisabled(email string, disabled bool) err
 		globalSelector.UnstickAccount(email)
 	}
 
-	if broadcaster != nil {
-		broadcaster.BroadcastAccounts(am.GetAccounts())
+	if b := currentBroadcaster(); b != nil {
+		b.BroadcastAccounts(am.GetAccounts())
 	}
 	logx.LogGateway("[AccountManager] Account %s disabled state set to: %v", email, disabled)
 	return nil

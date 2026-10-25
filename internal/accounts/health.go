@@ -65,8 +65,8 @@ func (am *AccountManager) RecordAccountError(email string, status int, text stri
 		acc.ErrorUntil = until
 	}
 	am.mu.Unlock()
-	if broadcaster != nil {
-		broadcaster.BroadcastAccounts(am.GetAccounts())
+	if b := currentBroadcaster(); b != nil {
+		b.BroadcastAccounts(am.GetAccounts())
 	}
 }
 

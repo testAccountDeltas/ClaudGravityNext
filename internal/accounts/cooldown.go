@@ -32,8 +32,8 @@ func (am *AccountManager) MarkAccountCooldown(email string, duration time.Durati
 	am.mu.Unlock()
 
 	globalSelector.UnstickAccount(email)
-	if broadcaster != nil {
-		broadcaster.BroadcastAccounts(am.GetAccounts())
+	if b := currentBroadcaster(); b != nil {
+		b.BroadcastAccounts(am.GetAccounts())
 	}
 }
 
@@ -58,8 +58,8 @@ func (am *AccountManager) MarkModelCooldown(email, model string, duration time.D
 		logx.LogGateway("[AccountManager] Account %s model %s put in cooldown for %v (429)", email, key, duration)
 	}
 	am.mu.Unlock()
-	if broadcaster != nil {
-		broadcaster.BroadcastAccounts(am.GetAccounts())
+	if b := currentBroadcaster(); b != nil {
+		b.BroadcastAccounts(am.GetAccounts())
 	}
 }
 
