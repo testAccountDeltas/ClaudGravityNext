@@ -45,7 +45,12 @@ func TestTriggerAsyncQuotaRefresh_OnlyWhenTheSnapshotIsStale(t *testing.T) {
 	}
 
 	globalAccountManager.TriggerAsyncQuotaRefresh("qr-stale@example.com", time.Minute)
-	eventually(t, "the stale account's refresh", func() bool { return n.Load() >= 1 })
+	// Wait for the background goroutine to finish (it clears its in-flight
+	// marker last), so it cannot overlap with whatever test runs next.
+	eventually(t, "the stale account's refresh", func() bool {
+		_, running := quotaRefreshInFlight.Load("qr-stale@example.com")
+		return n.Load() >= 1 && !running
+	})
 }
 
 func TestRefreshAllQuotas_FetchesEveryAccount(t *testing.T) {
