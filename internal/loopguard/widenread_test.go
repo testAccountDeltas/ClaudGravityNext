@@ -83,3 +83,29 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// A dense file makes 800 lines exceed Read's token cap. Once the client
+// reports that, the agent's widened size halves (never below the floor) and
+// the following paged Reads use it.
+func TestWidenPagedRead_ShrinksAfterAReadWasTooLarge(t *testing.T) {
+	const key = "main|s|i"
+	lg := newTestManager()
+	lg.NoteReadTooLarge(key)
+	got, ok := lg.WidenPagedRead(key, "Read", `{"file_path":"/dense","offset":900,"limit":100}`)
+	if !ok || gjson.Get(got, "limit").Int() != WidenedReadLimit/2 {
+		t.Fatalf("after one failure the size halves: %s", got)
+	}
+	if _, ok := lg.WidenPagedRead(key, "Read", `{"file_path":"/dense","offset":2000,"limit":400}`); ok {
+		t.Fatal("a limit already at the shrunk size is left alone")
+	}
+	for i := 0; i < 5; i++ {
+		lg.NoteReadTooLarge(key)
+	}
+	got, _ = lg.WidenPagedRead(key, "Read", `{"file_path":"/dense","offset":5000,"limit":50}`)
+	if gjson.Get(got, "limit").Int() != minWidenedReadLimit {
+		t.Fatalf("the floor holds: %s", got)
+	}
+	if got, ok := newTestManager().WidenPagedRead("other|s|i", "Read", `{"file_path":"/x","limit":50}`); !ok || gjson.Get(got, "limit").Int() != WidenedReadLimit {
+		t.Fatalf("another agent keeps the default: %s", got)
+	}
+}

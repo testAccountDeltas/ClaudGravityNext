@@ -54,6 +54,7 @@ type LoopGuardManager struct {
 	lastPlanMode  map[string]bool         // agentKey -> whether the last-recorded turn was under Plan Mode's lenient window/threshold
 	pendingNudges map[string][]string     // agentKey/sessionKey -> pending gateway notices to inject into system_instruction
 	lastWidened   map[string]widenedRange // agentKey -> the file range its last paged Read was widened to (widenread.go)
+	widenLimit    map[string]int64        // agentKey -> current widened Read size, shrunk when Read reported "too large" (widenread.go)
 }
 
 var globalLoopGuard = &LoopGuardManager{
@@ -65,6 +66,7 @@ var globalLoopGuard = &LoopGuardManager{
 	lastPlanMode:  make(map[string]bool),
 	pendingNudges: make(map[string][]string),
 	lastWidened:   make(map[string]widenedRange),
+	widenLimit:    make(map[string]int64),
 }
 
 // Global exposes the package-level singleton to callers outside this
@@ -152,6 +154,7 @@ func (lg *LoopGuardManager) sweepStale() {
 			delete(lg.lastPlanMode, k)
 			delete(lg.pendingNudges, k)
 			delete(lg.lastWidened, k)
+			delete(lg.widenLimit, k)
 		}
 	}
 }

@@ -285,3 +285,22 @@ func TestLastTurnHadFailedEdit(t *testing.T) {
 		}
 	}
 }
+
+func TestLastTurnReadTooLarge(t *testing.T) {
+	tooBig := `{"model":"m","max_tokens":1,"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"File content (34972 tokens) exceeds maximum allowed tokens (25000)."}]}]}`
+	if !lastTurnReadTooLarge(mustReq(t, tooBig)) {
+		t.Fatal("the cap error must be recognised")
+	}
+	for name, js := range map[string]string{
+		"other error":  `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"no such file"}]}]}`,
+		"not an error": `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"exceeds maximum allowed tokens"}]}]}`,
+		"plain text":   `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`,
+	} {
+		if lastTurnReadTooLarge(mustReq(t, js)) {
+			t.Errorf("%s must not count", name)
+		}
+	}
+	if lastTurnReadTooLarge(claude.Request{}) {
+		t.Error("empty request")
+	}
+}

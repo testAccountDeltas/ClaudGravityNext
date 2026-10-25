@@ -84,6 +84,10 @@ func applyLoopGuardNudges(req claude.Request, agentKey, sessionID, instanceID st
 			recordLoopNudge(sessionID, loopKey, nudgeText)
 		}
 	}
+	if lastTurnReadTooLarge(req) {
+		logx.LogGateway("[LoopGuard] Read reported the output too large; shrinking the widened Read size for %s", loopKey)
+		lg.NoteReadTooLarge(loopKey)
+	}
 	if lg.CheckAndResetOscillation(loopKey) {
 		var ok bool
 		req, ok = injectNudgeIntoTail(req, loopguard.NudgeOscillation)
@@ -101,6 +105,25 @@ func applyLoopGuardNudges(req claude.Request, agentKey, sessionID, instanceID st
 		}
 	}
 	return req
+}
+
+// lastTurnReadTooLarge reports whether the newest user message carries a Read
+// error saying the output exceeded the token cap, so the gateway can stop
+// widening Reads to a size this file cannot return.
+func lastTurnReadTooLarge(req claude.Request) bool {
+	if len(req.Messages) == 0 {
+		return false
+	}
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != claude.RoleUser {
+		return false
+	}
+	for _, b := range last.Content {
+		if tr, ok := b.AsToolResult(); ok && tr.IsError && strings.Contains(string(tr.Content), "exceeds maximum allowed tokens") {
+			return true
+		}
+	}
+	return false
 }
 
 func injectNudgeIntoTail(req claude.Request, text string) (claude.Request, bool) {

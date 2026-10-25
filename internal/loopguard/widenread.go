@@ -26,6 +26,37 @@ type widenedRange struct {
 // file is handled by the retry rule in WidenPagedRead.
 const WidenedReadLimit = 800
 
+// minWidenedReadLimit is the floor the adaptive shrink in NoteReadTooLarge
+// stops at.
+const minWidenedReadLimit = 200
+
+// widenLimitLocked is the size loopKey's paged Reads are widened to. Caller
+// must hold lg.mu.
+func (lg *LoopGuardManager) widenLimitLocked(loopKey string) int64 {
+	if n, ok := lg.widenLimit[loopKey]; ok {
+		return n
+	}
+	return WidenedReadLimit
+}
+
+// NoteReadTooLarge records that a Read of loopKey came back with "exceeds
+// maximum allowed tokens" (a dense file: long lines make 800 lines more than
+// the ~25k-token cap). The widened size for this agent is halved, down to
+// minWidenedReadLimit, so the next paged Read does not fail the same way.
+func (lg *LoopGuardManager) NoteReadTooLarge(loopKey string) {
+	lg.mu.Lock()
+	defer lg.mu.Unlock()
+	next := lg.widenLimitLocked(loopKey) / 2
+	if next < minWidenedReadLimit {
+		next = minWidenedReadLimit
+	}
+	if lg.widenLimit == nil {
+		lg.widenLimit = make(map[string]int64)
+	}
+	lg.widenLimit[loopKey] = next
+	lg.touchLocked(loopKey)
+}
+
 // WidenPagedRead returns argsRaw with a small "limit" raised to
 // WidenedReadLimit when toolName is Read. It reports whether it changed
 // anything. offset and file_path are never touched.
@@ -55,10 +86,14 @@ func (lg *LoopGuardManager) WidenPagedRead(loopKey, toolName, argsRaw string) (s
 
 	lg.mu.Lock()
 	defer lg.mu.Unlock()
-	if prev, ok := lg.lastWidened[loopKey]; ok && prev.path == path && offset >= prev.start && offset < prev.start+WidenedReadLimit {
+	target := lg.widenLimitLocked(loopKey)
+	if limit.Int() >= target {
 		return argsRaw, false
 	}
-	widened, err := sjson.Set(argsRaw, "limit", WidenedReadLimit)
+	if prev, ok := lg.lastWidened[loopKey]; ok && prev.path == path && offset >= prev.start && offset < prev.start+target {
+		return argsRaw, false
+	}
+	widened, err := sjson.Set(argsRaw, "limit", target)
 	if err != nil {
 		return argsRaw, false
 	}
