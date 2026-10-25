@@ -32,7 +32,12 @@ type execOpts struct {
 	afterSeed   func()
 	up          func(n int, req *http.Request, body string) (*http.Response, error)
 	// timeouts, seconds (0 -> 5)
-	ttft int
+	ttft  int
+	panic int // PanicTimeoutSeconds (0 -> 5)
+	// direct runs the request as a plain API-key tenant (no Antigravity pool).
+	direct bool
+	// tenant tweaks the tenant before translation.
+	tenant func(*config.TenantConfig)
 }
 
 type execRes struct {
@@ -62,6 +67,9 @@ func runExec(t *testing.T, o execOpts) execRes {
 	}
 	if o.ttft == 0 {
 		o.ttft = 5
+	}
+	if o.panic == 0 {
+		o.panic = 5
 	}
 	restoreOAuth := accounts.SetHTTPClientForTest(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		b, _ := io.ReadAll(req.Body)
@@ -102,13 +110,16 @@ func runExec(t *testing.T, o execOpts) execRes {
 
 	tenant := config.TenantConfig{Name: "t", GoogleAuthType: "oauth", DefaultModel: "gemini-3.8-flash-tiered"}
 	sess := "sess-" + t.Name()
-	tr, err := translate.ConvertClaudeRequestToGemini([]byte(o.claude), tenant, "", "main", sess, "", true)
+	if o.tenant != nil {
+		o.tenant(&tenant)
+	}
+	tr, err := translate.ConvertClaudeRequestToGemini([]byte(o.claude), tenant, "", "main", sess, "", !o.direct)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := &reqctx.Params{RID: 960, SessionID: sess, ConvAnchor: "anc-" + t.Name(), Tenant: tenant,
-		ServerCfg: config.ServerConfig{PanicTimeoutSeconds: 5, TTFTTimeoutSeconds: o.ttft, ReadTimeoutSeconds: 5, MaxStreamDurationSeconds: 10},
-		ModelName: "claude-sonnet-4-5", IsStreaming: o.streaming, IsAntigravity: true, PrefillText: tr.PrefillText,
+		ServerCfg: config.ServerConfig{PanicTimeoutSeconds: o.panic, TTFTTimeoutSeconds: o.ttft, ReadTimeoutSeconds: 5, MaxStreamDurationSeconds: 10},
+		ModelName: "claude-sonnet-4-5", IsStreaming: o.streaming, IsAntigravity: !o.direct, PrefillText: tr.PrefillText,
 		SyntheticReasonTools: tr.SyntheticReasonTools, ReverseToolNameMap: tr.ReverseToolNameMap, RawClaudeBody: []byte(o.claude)}
 	st := &reqctx.State{StartedAt: time.Now(), ResolvedModelName: tr.ResolvedModel, GeminiBody: tr.GeminiBody, EstInputTokens: tr.EstimatedInputTokens}
 	rec := httptest.NewRecorder()

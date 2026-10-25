@@ -100,7 +100,15 @@ func (f *FSM) handleInBandError(errNode gjson.Result) error {
 	f.mu.Lock()
 	f.hasFinished = true
 	f.mu.Unlock()
-	return fmt.Errorf("upstream stream error: %s", msg)
+	// Keep Google's status word in the text: the orchestrator maps it to the
+	// reported HTTP status (429/503/504) and decides on an account cooldown
+	// from it, but the free-form message alone ("Resource has been exhausted")
+	// never contains it.
+	statusWord := errNode.Get("status").String()
+	if statusWord == "" {
+		statusWord = errType
+	}
+	return fmt.Errorf("upstream stream error (%s): %s", statusWord, msg)
 }
 
 // FinishWithError is the fallback for when the upstream read loop dies
