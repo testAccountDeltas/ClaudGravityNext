@@ -12,10 +12,18 @@ jobs:
           go-version-file: go.mod
       - name: build and vet
         run: go build ./... && go vet ./...
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would rewrite:"; echo "$unformatted"; exit 1
+          fi
       - name: tests (shuffled, repeated)
         run: go test -shuffle=on -count=2 ./...
       - name: tests with the race detector
         run: go test -race ./...
+      - name: coverage gate
+        run: bash scripts/coverage_gate.sh
       - name: fuzz smoke
         run: |
           for pkg in $(grep -rl "^func Fuzz" --include=*_test.go . | xargs -n1 dirname | sort -u); do

@@ -215,11 +215,19 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 						if res.resp != nil && res.resp.Body != nil {
 							_ = res.resp.Body.Close()
 						}
+						// Same classification as every other branch: a cancellation is
+						// the watchdog (504) or the client leaving (499), not a bad
+						// gateway. The watchdog's own ctx.Done() case below races this
+						// one when both fire together, so they must agree.
+						status := upstreamErrStatus(res.err)
+						if clientGone(baseCtx) {
+							status = 499
+						}
 						wMu.Lock()
 						sw.TerminateWithError("overloaded_error", fmt.Sprintf("Upstream timed out or failed: %v", res.err))
 						wMu.Unlock()
-						logFailure(true, res.err.Error(), http.StatusBadGateway)
-						return true, http.StatusBadGateway, res.err
+						logFailure(true, res.err.Error(), status)
+						return true, status, res.err
 					}
 					upResp = res.resp
 					break waitAfterPanic
@@ -230,11 +238,15 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 					wMu.Unlock()
 
 				case <-wd.ctx.Done():
+					status := http.StatusGatewayTimeout
+					if clientGone(baseCtx) {
+						status = 499 // the client left, the watchdog did not fire
+					}
 					wMu.Lock()
 					sw.TerminateWithError("overloaded_error", "Upstream timed out: no response received")
 					wMu.Unlock()
-					logFailure(true, "Upstream context timeout after panic", http.StatusGatewayTimeout)
-					return true, http.StatusGatewayTimeout, wd.ctx.Err()
+					logFailure(true, "Upstream context timeout after panic", status)
+					return true, status, wd.ctx.Err()
 				}
 			}
 		}

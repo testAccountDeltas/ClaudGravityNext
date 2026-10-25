@@ -140,8 +140,10 @@ func TestAttempt_DirectKey_NoAnswerAtAllEndsWithATimeoutErrorEvent(t *testing.T)
 	if !r.ok || r.status != http.StatusGatewayTimeout {
 		t.Fatalf("ok=%v status=%d err=%v", r.ok, r.status, r.err)
 	}
-	if !strings.Contains(r.body, "Upstream timed out: no response received") || !strings.Contains(r.body, "event: ping") {
-		t.Fatalf("want pings followed by a timeout error event:\n%s", r.body)
+	// Two outcomes race when the watchdog fires (its own Done, or the
+	// transport's cancellation error); both must read as a timeout.
+	if !strings.Contains(r.body, "Upstream timed out") || !strings.Contains(r.body, "event: ping") {
+		t.Fatalf("want a ping followed by a timeout error event:\n%s", r.body)
 	}
 }
 
@@ -198,5 +200,31 @@ func TestAttempt_ClientHangsUpWhileWaiting_Reports499(t *testing.T) {
 				t.Fatalf("a client that left is 499 with nothing written: ok=%v status=%d body=%q err=%v", r.ok, r.status, r.body, r.err)
 			}
 		})
+	}
+}
+
+// After the early ping the response is already committed, so the failure
+// becomes a terminal SSE event; the status the gateway reports must still say
+// who ended it. These cases pick one branch deterministically (the watchdog
+// path races its own cancellation error, which both land on the same answer).
+func TestAttempt_DirectKey_CancellationAfterEarlyPingIsATimeoutNot502(t *testing.T) {
+	r := runAttempt(t, attemptEnv{panicSec: 1, ttftSec: 30,
+		up: slowThen(1300*time.Millisecond, func() (*http.Response, error) { return nil, context.Canceled })})
+	if !r.ok || r.status != http.StatusGatewayTimeout {
+		t.Fatalf("a cancellation is a timeout (504), not a bad gateway: ok=%v status=%d", r.ok, r.status)
+	}
+}
+
+func TestAttempt_DirectKey_ClientLeavingAfterEarlyPingIs499(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(1400*time.Millisecond, cancel)
+	r := runAttempt(t, attemptEnv{panicSec: 1, ttftSec: 30, ctx: ctx,
+		up: func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}})
+	if !r.ok || r.status != 499 {
+		t.Fatalf("a client that hung up after the ping is 499, not a gateway timeout: ok=%v status=%d", r.ok, r.status)
 	}
 }

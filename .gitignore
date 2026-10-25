@@ -44,3 +44,6 @@ testdata/raw_chunks/
 
 # Agent worktrees / local Claude Code state
 .claude/
+
+# coverage profile written by scripts/coverage_gate.sh
+cover.out
