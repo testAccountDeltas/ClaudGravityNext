@@ -356,7 +356,11 @@ func ExchangeAuthCode(code string) (*Record, error) {
 		"timestamp":     time.Now().UnixMilli(),
 	}
 	b, _ := json.MarshalIndent(fileData, "", "  ")
+	// Same lock as every other read-modify-write of an account auth file, so a
+	// re-login cannot interleave with a concurrent token refresh of that file.
+	authFileMu.Lock()
 	_ = atomicfile.WriteFile(filePath, b)
+	authFileMu.Unlock()
 
 	record := &Record{
 		Email:        email,

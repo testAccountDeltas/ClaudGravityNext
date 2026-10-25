@@ -146,3 +146,30 @@ func TestRetryAfterFromPoolCooldown(t *testing.T) {
 		t.Errorf("idle account = %v", d)
 	}
 }
+
+// An account with no cooldown but an exhausted quota bucket is not idle: the
+// client must be told to wait for the bucket reset, not 30 seconds.
+func TestRetryAfterCountsExhaustedQuotaBuckets(t *testing.T) {
+	now := time.Now()
+	exhausted := &accounts.Record{Quotas: []accounts.QuotaGroup{{
+		DisplayName: "Gemini Models",
+		Buckets:     []accounts.QuotaBucket{{BucketID: "5h", RemainingFraction: 0, ResetTime: now.Add(2 * time.Hour).Format(time.RFC3339)}},
+	}}}
+	if d := retryAfterFromRecords([]*accounts.Record{exhausted}, now); d != 900*time.Second {
+		t.Errorf("exhausted bucket = %v, want the 15 minute clamp", d)
+	}
+	soon := &accounts.Record{Quotas: []accounts.QuotaGroup{{
+		DisplayName: "Gemini Models",
+		Buckets:     []accounts.QuotaBucket{{BucketID: "5h", RemainingFraction: 0, ResetTime: now.Add(3 * time.Minute).Format(time.RFC3339)}},
+	}}}
+	if d := retryAfterFromRecords([]*accounts.Record{exhausted, soon}, now); d < 170*time.Second || d > 181*time.Second {
+		t.Errorf("soonest reset = %v, want about 3m", d)
+	}
+	fresh := &accounts.Record{Quotas: []accounts.QuotaGroup{{
+		DisplayName: "Gemini Models",
+		Buckets:     []accounts.QuotaBucket{{BucketID: "5h", RemainingFraction: 0.8, ResetTime: now.Add(time.Hour).Format(time.RFC3339)}},
+	}}}
+	if d := retryAfterFromRecords([]*accounts.Record{exhausted, fresh}, now); d != 30*time.Second {
+		t.Errorf("a healthy account = %v, want 30s", d)
+	}
+}

@@ -41,8 +41,11 @@ func retryAfterFromRecords(recs []*accounts.Record, now time.Time) time.Duration
 			continue
 		}
 		anyEnabled = true
-		if a.CooldownUntil.After(now) {
-			d := a.CooldownUntil.Sub(now)
+		// Account-wide cooldown AND exhausted quota buckets: an account whose
+		// five-hour bucket is empty is not "usable right now" just because
+		// its CooldownUntil has not been set.
+		if at := a.AvailableAt(now); at.After(now) {
+			d := at.Sub(now)
 			if !found || d < soonest {
 				soonest, found = d, true
 			}

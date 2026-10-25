@@ -111,3 +111,17 @@ func (as *AccountSelector) EarliestAvailability(model string) time.Time {
 	}
 	return best
 }
+
+// AvailableAt returns the moment the account stops being blocked by its
+// account-wide cooldown and by exhausted quota buckets; now (or earlier) means
+// it is usable. Per-model cooldowns are not included (see EarliestAvailability).
+func (a *Record) AvailableAt(now time.Time) time.Time {
+	at := now
+	if a.CooldownUntil.After(at) {
+		at = a.CooldownUntil
+	}
+	if q := quotaBlockUntil(a.Quotas, now); q.After(at) {
+		at = q
+	}
+	return at
+}
