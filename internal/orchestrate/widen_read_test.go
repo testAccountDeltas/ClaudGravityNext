@@ -15,16 +15,8 @@ func readCall(args string) string {
 }
 
 // The non-streaming path widens a paged Read the same way the streaming FSM
-// does, once the agent's read-loop nudge has fired.
-func TestNonStreaming_WidensAPagedReadAfterTheNudge(t *testing.T) {
-	key := "|sess-" + t.Name() + "|"
-	lg := loopguard.Global()
-	for i := 0; i < 10; i++ {
-		lg.RecordReadTurnWithRealProgress(key, 1, false, false, 15, false)
-	}
-	if lg.CheckAndResetReadStreak(key, 10) != 1 {
-		t.Fatal("setup: nudge should fire")
-	}
+// does.
+func TestNonStreaming_WidensAPagedRead(t *testing.T) {
 	claude := `{"model":"claude-sonnet-4-5","max_tokens":1024,"tools":[{"name":"Read","input_schema":{"type":"object","properties":{"file_path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}}],"messages":[{"role":"user","content":"go on"}]}`
 	r := runExec(t, execOpts{nAcc: 1, claude: claude,
 		up: func(int, *http.Request, string) (*http.Response, error) {

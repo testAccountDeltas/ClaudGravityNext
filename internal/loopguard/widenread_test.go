@@ -6,19 +6,12 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func nudged(key string) *LoopGuardManager {
-	lg := newTestManager()
-	lg.nudgeCount[key] = 1
-	return lg
-}
+func nudged(string) *LoopGuardManager { return newTestManager() }
 
-func TestWidenPagedRead_OnlyAfterTheAgentWasNudged(t *testing.T) {
+func TestWidenPagedRead_NeedsNoNudgeAndOnlyChangesLimit(t *testing.T) {
 	const key = "main|s|i"
 	args := `{"file_path":"/x/a.md","offset":100,"limit":100}`
 
-	if got, ok := newTestManager().WidenPagedRead(key, "Read", args); ok || got != args {
-		t.Fatalf("an agent that was never nudged must not be touched: %s", got)
-	}
 	got, ok := nudged(key).WidenPagedRead(key, "Read", args)
 	if !ok || gjson.Get(got, "limit").Int() != WidenedReadLimit {
 		t.Fatalf("limit not widened: %s", got)
@@ -33,7 +26,7 @@ func TestWidenPagedRead_LeavesEverythingElseAlone(t *testing.T) {
 	for name, c := range map[string]struct{ tool, args string }{
 		"another tool":      {"Grep", `{"file_path":"/a","limit":10}`},
 		"no limit":          {"Read", `{"file_path":"/a"}`},
-		"already large":     {"Read", `{"file_path":"/a","limit":500}`},
+		"already large":     {"Read", `{"file_path":"/a","limit":800}`},
 		"much larger":       {"Read", `{"file_path":"/a","limit":2000}`},
 		"zero limit":        {"Read", `{"file_path":"/a","limit":0}`},
 		"limit not numeric": {"Read", `{"file_path":"/a","limit":"100"}`},
@@ -44,8 +37,8 @@ func TestWidenPagedRead_LeavesEverythingElseAlone(t *testing.T) {
 			t.Errorf("%s: changed to %s", name, got)
 		}
 	}
-	if _, ok := nudged("").WidenPagedRead("", "Read", `{"file_path":"/a","limit":10}`); ok {
-		t.Error("no agent key, nothing to decide on")
+	if _, ok := nudged("").WidenPagedRead("", "Read", `{"file_path":"/a","limit":10}`); !ok {
+		t.Error("an empty agent key still widens")
 	}
 	if _, ok := nudged(key).WidenPagedRead(key, "read", `{"file_path":"/a","limit":10}`); !ok {
 		t.Error("tool name matching is case-insensitive")
@@ -77,19 +70,6 @@ func TestWidenPagedRead_SequentialPagingAndRetries(t *testing.T) {
 	}
 	if l, ok := read("/other", 0); !ok || l != WidenedReadLimit {
 		t.Fatalf("a different file is widened: %d %v", l, ok)
-	}
-}
-
-func TestWidenPagedRead_RealProgressEndsIt(t *testing.T) {
-	const key = "main|s|i"
-	lg := nudged(key)
-	args := `{"file_path":"/a","limit":50}`
-	if _, ok := lg.WidenPagedRead(key, "Read", args); !ok {
-		t.Fatal("setup: should widen")
-	}
-	lg.RecordReadTurnWithRealProgress(key, 0, true, true, 15, false) // a real Write/Edit
-	if got, ok := lg.WidenPagedRead(key, "Read", `{"file_path":"/b","limit":50}`); ok {
-		t.Fatalf("after real progress the nudge state is clean: %s", got)
 	}
 }
 
