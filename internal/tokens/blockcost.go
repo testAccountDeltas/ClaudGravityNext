@@ -121,12 +121,6 @@ func blockCostP(b claude.Block, isLastAssistant bool, textCost func(string) int,
 	}
 }
 
-// toolResultCost prices a tool_result's dynamic Content: a bare string, or
-// an array mixing text/image/document blocks and/or bare strings.
-func toolResultCost(content json.RawMessage, isLastAssistant bool, textCost func(string) int) int {
-	return toolResultCostP(content, isLastAssistant, textCost, Gemini2Profile)
-}
-
 func toolResultCostP(content json.RawMessage, isLastAssistant bool, textCost func(string) int, prof Profile) int {
 	var s string
 	if err := json.Unmarshal(content, &s); err == nil {

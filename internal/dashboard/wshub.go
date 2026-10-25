@@ -201,10 +201,6 @@ func (h *WSHub) BroadcastSessionsUpdate() {
 	h.Broadcast("sessions:update", sessions)
 }
 
-func (h *WSHub) BroadcastStats(stats interface{}) {
-	h.Broadcast("stats:update", stats)
-}
-
 // sendInitialSnapshot now matches v1 in full — the accounts/catalog
 // fields deferred in Phase 1 are completed here (see this file's
 // package doc comment).

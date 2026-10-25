@@ -26,7 +26,3 @@ func (f *FSM) findStopSequence(s string) (idx int, seq string) {
 	}
 	return idx, seq
 }
-
-// StopSequenceMatched reports the client stop sequence the gateway cut the
-// text at, "" when none fired.
-func (f *FSM) StopSequenceMatched() string { return f.stopMatched }

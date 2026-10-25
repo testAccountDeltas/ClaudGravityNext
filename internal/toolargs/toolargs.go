@@ -63,12 +63,6 @@ func lookupPrimaryParam(name string) (string, bool) {
 	return "", false
 }
 
-func isShellTool(nameLower string) bool {
-	return nameLower == "bash" || strings.HasPrefix(nameLower, "bash_") || strings.HasPrefix(nameLower, "bash-") ||
-		nameLower == "powershell" || strings.HasPrefix(nameLower, "powershell_") || strings.HasPrefix(nameLower, "powershell-") ||
-		nameLower == "pwsh" || strings.HasPrefix(nameLower, "pwsh_") || strings.HasPrefix(nameLower, "pwsh-")
-}
-
 // NormalizeToArgsObject guarantees argsRaw, when parsed as JSON, is an
 // object — the Anthropic streaming protocol accumulates
 // "input_json_delta" partial_json into tool_use.input, which the

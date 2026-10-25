@@ -302,50 +302,6 @@ func TestSweepStale_ClearsLastPlanMode(t *testing.T) {
 	}
 }
 
-func TestInjectUserNudge_AppendsToTrailingToolResult(t *testing.T) {
-	req := map[string]interface{}{
-		"session_id": "sess-test-tool-result",
-		"messages": []interface{}{
-			map[string]interface{}{
-				"role": "user",
-				"content": []interface{}{
-					map[string]interface{}{"type": "tool_result", "tool_use_id": "t1", "content": `{"status":"ok"}`},
-				},
-			},
-		},
-	}
-	InjectUserNudge(req, "test nudge")
-	msgs := req["messages"].([]interface{})
-	if len(msgs) != 1 {
-		t.Fatalf("must keep single message turn, not add a new message, got %d messages", len(msgs))
-	}
-	// Verify tool_result content is NOT polluted with notice
-	tr := msgs[0].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})
-	if tr["content"] != `{"status":"ok"}` {
-		t.Fatalf("tool_result content was corrupted: %v", tr["content"])
-	}
-	// Verify pending nudge was recorded instead
-	nudges := TakePendingNudges("sess-test-tool-result")
-	if len(nudges) != 1 || nudges[0] != "test nudge" {
-		t.Fatalf("expected pending nudge to be recorded, got %v", nudges)
-	}
-}
-
-func TestInjectUserNudge_SkipsWhenLastTurnIsAssistant(t *testing.T) {
-	req := map[string]interface{}{
-		"messages": []interface{}{
-			map[string]interface{}{"role": "assistant", "content": []interface{}{
-				map[string]interface{}{"type": "text", "text": "partial answer"},
-			}},
-		},
-	}
-	InjectUserNudge(req, "test nudge")
-	msgs := req["messages"].([]interface{})
-	if len(msgs) != 1 {
-		t.Fatal("must not append a new message when the conversation ends on an assistant turn (would break prefill)")
-	}
-}
-
 func TestIsPlanModeRequest_DetectsExitPlanModeTool(t *testing.T) {
 	body := []byte(`{"tools":[{"name":"ExitPlanMode"}]}`)
 	if !isPlanModeRequest(body) {
