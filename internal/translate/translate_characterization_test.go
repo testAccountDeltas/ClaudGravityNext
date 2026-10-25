@@ -256,33 +256,46 @@ func TestConvertToolUseBlock_RoleInversionDegradesToText(t *testing.T) {
 	}
 }
 
-func TestConvertToolUseBlock_UndeclaredToolDegradesToText(t *testing.T) {
-	block := gjson.Parse(mustJSON(t, `{"type":"tool_use","id":"toolu_1","name":"Grep","input":{"pattern":"foo"}}`))
-	tn := toolNameInfo{effectiveToolNames: map[string]bool{}, disambiguatedToolName: map[string]string{}}
-	parts := convertToolUseBlock(block, "assistant", tn, true)
-	if gjson.Get(parts[0], "functionCall").Exists() {
-		t.Fatalf("a tool stripped from this request's declarations must not be replayed as a functionCall")
-	}
-	if !strings.Contains(gjson.Get(parts[0], "text").String(), "Grep") {
-		t.Fatalf("expected the degraded text to name the tool, got %v", parts)
+// A tool this request no longer declares is not replayed as a functionCall
+// (Gemini would 400) and is not narrated in the model turn either: the model
+// reproduced such a "(Note: an earlier call to the X tool ... is omitted ...)"
+// text as its own visible output (seen with TaskUpdate / TaskCreate).
+func TestConvertToolUseBlock_UndeclaredToolIsDroppedSilently(t *testing.T) {
+	for _, name := range []string{"Grep", "TaskCreate", "TaskUpdate"} {
+		block := gjson.Parse(mustJSON(t, `{"type":"tool_use","id":"toolu_1","name":"`+name+`","input":{"pattern":"foo"}}`))
+		tn := toolNameInfo{effectiveToolNames: map[string]bool{}, disambiguatedToolName: map[string]string{}}
+		if parts := convertToolUseBlock(block, "assistant", tn, true); len(parts) != 0 {
+			t.Errorf("%s: an undeclared tool call must produce no part, got %v", name, parts)
+		}
 	}
 }
 
-// A live traffic capture caught the model pattern-matching a prior
-// "[Called X(args)]"-shaped degradation and reproducing that exact
-// bracket/parens syntax as its OWN new text output instead of a real
-// tool_use (stop_reason stayed "end_turn") — the degraded text must not
-// look like callable syntax worth imitating.
-func TestConvertToolUseBlock_UndeclaredTool_DegradedTextIsNotBracketSyntax(t *testing.T) {
-	block := gjson.Parse(mustJSON(t, `{"type":"tool_use","id":"toolu_1","name":"TaskCreate","input":{"subject":"x"}}`))
-	tn := toolNameInfo{effectiveToolNames: map[string]bool{}, disambiguatedToolName: map[string]string{}}
-	parts := convertToolUseBlock(block, "assistant", tn, true)
-	text := gjson.Get(parts[0], "text").String()
-	if strings.Contains(text, "[Called") {
-		t.Fatalf("degraded text must not use the mimicable [Called Name(...)] shape, got %q", text)
+func TestConvert_UndeclaredEarlierCallNeverReachesTheModelTurnAsText(t *testing.T) {
+	req := `{"model":"claude-opus-4-5","max_tokens":64,` +
+		`"tools":[{"name":"Read","description":"r","input_schema":{"type":"object","properties":{}}}],` +
+		`"messages":[{"role":"user","content":"go"},` +
+		`{"role":"assistant","content":[{"type":"text","text":"updating"},{"type":"tool_use","id":"tu1","name":"TaskUpdate","input":{"taskId":"1","status":"completed"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"Updated task 1"}]},` +
+		`{"role":"user","content":"next"}]}`
+	res, err := ConvertClaudeRequestToGemini([]byte(req), config.TenantConfig{}, "main", "main", "s", "i", true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(text, "TaskCreate") {
-		t.Fatalf("expected the degraded text to still name the tool, got %q", text)
+	seen := false
+	for _, c := range gjson.GetBytes(res.GeminiBody, "contents").Array() {
+		if c.Get("role").String() != "model" {
+			continue
+		}
+		seen = true
+		if strings.Contains(c.Raw, "omitted here") || strings.Contains(c.Raw, "TaskUpdate") {
+			t.Fatalf("the model turn must not mention the dropped call: %s", c.Raw)
+		}
+		if !strings.Contains(c.Raw, "updating") {
+			t.Fatalf("the model's own text is kept: %s", c.Raw)
+		}
+	}
+	if !seen {
+		t.Fatalf("no model turn in %s", res.GeminiBody)
 	}
 }
 
@@ -786,16 +799,30 @@ func TestApplyGenerationConfig_ZeroMaxTokens_DeletesThinkingConfig(t *testing.T)
 	}
 }
 
-func TestConvertToolUseBlock_UndeclaredTool_HasThoughtSignatureInAntigravity(t *testing.T) {
-	block := gjson.Parse(`{"type":"tool_use","id":"call_123","name":"Grep","input":{"pattern":"foo"}}`)
-	tn := toolNameInfo{effectiveToolNames: map[string]bool{"Bash": true}}
-	parts := convertToolUseBlock(block, "assistant", tn, true)
-	if len(parts) != 1 {
-		t.Fatalf("expected 1 part, got %d", len(parts))
+// A model turn that held nothing but a dropped (undeclared) call is not left
+// empty: it gets the placeholder part, signed for Antigravity, which rejects a
+// model turn without a thought signature.
+func TestConvert_ModelTurnOfOnlyADroppedCallKeepsASignedPlaceholder(t *testing.T) {
+	req := `{"model":"claude-opus-4-5","max_tokens":64,` +
+		`"tools":[{"name":"Read","description":"r","input_schema":{"type":"object","properties":{}}}],` +
+		`"messages":[{"role":"user","content":"go"},` +
+		`{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"TaskUpdate","input":{"taskId":"1"}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"ok"}]}]}`
+	res, err := ConvertClaudeRequestToGemini([]byte(req), config.TenantConfig{}, "main", "main", "s", "i", true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	sig := gjson.Get(parts[0], "thoughtSignature").String()
-	if sig != "skip_thought_signature_validator" {
-		t.Fatalf("expected skip_thought_signature_validator for degraded tool in antigravity, got %q", sig)
+	var model gjson.Result
+	for _, c := range gjson.GetBytes(res.GeminiBody, "contents").Array() {
+		if c.Get("role").String() == "model" {
+			model = c
+		}
+	}
+	if !model.Exists() || model.Get("parts.0.text").String() == "" || model.Get("parts.0.thoughtSignature").String() != "skip_thought_signature_validator" {
+		t.Fatalf("expected a signed placeholder, got %s", model.Raw)
+	}
+	if strings.Contains(model.Raw, "TaskUpdate") || strings.Contains(model.Raw, "omitted") {
+		t.Fatalf("the dropped call must not be narrated: %s", model.Raw)
 	}
 }
 

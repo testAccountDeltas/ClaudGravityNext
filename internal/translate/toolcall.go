@@ -90,26 +90,17 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 		// referencing an undeclared name: Gemini validates every
 		// functionCall.name in the conversation against the CURRENT
 		// declared list and 400s the WHOLE request otherwise.
-		argsPreview := argsRaw
-		if len(argsPreview) > 200 {
-			argsPreview = cutUTF8(argsPreview, 200) + "..."
-		}
-		// Deliberately NOT formatted as "[Called Name(args)]" — a real,
-		// observed incident (live traffic capture) showed the model
-		// pattern-matching that exact bracket-and-parens shape from its
-		// own history and reproducing it VERBATIM as plain text for an
-		// unrelated later tool call, instead of emitting a real
-		// structured tool_use (stop_reason stayed "end_turn", so Claude
-		// Code never executed it — the call silently became dead text in
-		// the user's terminal). Neutral prose carries the same
-		// information to the model without looking like callable syntax
-		// worth imitating.
-		part := `{"text":""}`
-		if isAntigravity {
-			part, _ = sjson.Set(part, "thoughtSignature", "skip_thought_signature_validator")
-		}
-		part, _ = sjson.Set(part, "text", "(Note: an earlier call to the "+name+" tool, with arguments "+argsPreview+", is omitted here because that tool is not available in this turn.)")
-		return []string{part}
+		// The call is dropped, not narrated. It used to be replaced by a
+		// "(Note: an earlier call to the X tool ... is omitted ...)" text
+		// part in the MODEL turn, and the model then reproduced that note
+		// verbatim as its own visible output (observed with TaskUpdate when
+		// the client had deferred the tool). Earlier fixes tried neutral
+		// prose instead of "[Called X(args)]"; any text the model sees as
+		// its own past words gets imitated. What the call returned is still
+		// kept: its paired tool_result is summarized in the USER turn
+		// (toolresult.go). A model turn left empty by this gets the usual
+		// placeholder in messages.go.
+		return nil
 	}
 
 	part := `{"functionCall":{"name":"","args":{}}}`

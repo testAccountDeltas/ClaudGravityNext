@@ -50,6 +50,4 @@ func TestToolResultPreviewsAreValidUTF8(t *testing.T) {
 	long = strings.Repeat("a", 199) + strings.Repeat("字", 50)
 	block = gjson.Parse(`{"type":"tool_result","tool_use_id":"u1","content":` + jsonString(long) + `}`)
 	check("undeclared", convertToolResultBlock(block, "user", map[string]string{"u1": "Gone"}, tn, gjson.Result{}))
-	use := gjson.Parse(`{"type":"tool_use","id":"u1","name":"Gone","input":{"q":` + jsonString(long) + `}}`)
-	check("tool_use", convertToolUseBlock(use, "assistant", tn, false))
 }
