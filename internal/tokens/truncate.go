@@ -195,6 +195,10 @@ func TruncateConversationToFit(req claude.Request, maxTokens int64, requestedMax
 			Type: "text",
 			Text: noticeText,
 		}))
+		// Copy before writing: req is a by-value copy but its Messages slice
+		// still shares the caller's backing array, and this function must
+		// not mutate the caller's request.
+		req.Messages = append([]claude.Message(nil), req.Messages...)
 		req.Messages[0].Content = msg0Content
 	}
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fails when total statement coverage drops below COVER_MIN (default 80).
+# Fails when total statement coverage drops below COVER_MIN (default 90).
 #
 # Coverage is measured across every package at once (-coverpkg), so code
 # exercised only by another package's tests (e.g. cmd/gateway end-to-end
@@ -11,7 +11,7 @@
 #   COVER_MIN=85 scripts/coverage_gate.sh   # stricter
 set -euo pipefail
 
-min="${COVER_MIN:-80}"
+min="${COVER_MIN:-90}"
 profile="${COVER_PROFILE:-cover.out}"
 pkgs="$(go list ./... | grep -vE 'cmd/(livecheck|shadowcompare|speccheck)|internal/testutil' | paste -sd, -)"
 

@@ -43,7 +43,9 @@ var (
 // </task-notification>, <task_result>, </task_result> that models might hallucinate
 // from session history, preventing terminal UI corruption in Claude Code CLI.
 func StripSyntheticXMLTags(content string) string {
-	if !strings.Contains(content, "task-") && !strings.Contains(content, "task_") {
+	// The regex is case-insensitive, so the fast-path pre-check must be too.
+	lower := strings.ToLower(content)
+	if !strings.Contains(lower, "task-") && !strings.Contains(lower, "task_") {
 		return content
 	}
 	return syntheticXMLTagsPattern.ReplaceAllString(content, "")
