@@ -291,6 +291,9 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 	if err != nil {
 		return Result{}, fmt.Errorf("re-marshal sanitized json: %w", err)
 	}
+	// Tools the client executed earlier but no longer lists stay callable
+	// (see historytools.go) instead of being replayed as text notes.
+	sanitizedBytes = declareToolsUsedInHistory(sanitizedBytes)
 	root := gjson.ParseBytes(sanitizedBytes)
 	out := "{}"
 

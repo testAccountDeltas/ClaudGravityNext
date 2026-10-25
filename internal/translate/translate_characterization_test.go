@@ -270,12 +270,12 @@ func TestConvertToolUseBlock_UndeclaredToolIsDroppedSilently(t *testing.T) {
 	}
 }
 
-func TestConvert_UndeclaredEarlierCallNeverReachesTheModelTurnAsText(t *testing.T) {
+func TestConvert_UndeclaredEarlierCallThatFailedNeverReachesTheModelTurnAsText(t *testing.T) {
 	req := `{"model":"claude-opus-4-5","max_tokens":64,` +
 		`"tools":[{"name":"Read","description":"r","input_schema":{"type":"object","properties":{}}}],` +
 		`"messages":[{"role":"user","content":"go"},` +
 		`{"role":"assistant","content":[{"type":"text","text":"updating"},{"type":"tool_use","id":"tu1","name":"TaskUpdate","input":{"taskId":"1","status":"completed"}}]},` +
-		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"Updated task 1"}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","is_error":true,"content":"Updated task 1"}]},` +
 		`{"role":"user","content":"next"}]}`
 	res, err := ConvertClaudeRequestToGemini([]byte(req), config.TenantConfig{}, "main", "main", "s", "i", true)
 	if err != nil {
@@ -807,7 +807,7 @@ func TestConvert_ModelTurnOfOnlyADroppedCallKeepsASignedPlaceholder(t *testing.T
 		`"tools":[{"name":"Read","description":"r","input_schema":{"type":"object","properties":{}}}],` +
 		`"messages":[{"role":"user","content":"go"},` +
 		`{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"TaskUpdate","input":{"taskId":"1"}}]},` +
-		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","content":"ok"}]}]}`
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","is_error":true,"content":"ok"}]}]}`
 	res, err := ConvertClaudeRequestToGemini([]byte(req), config.TenantConfig{}, "main", "main", "s", "i", true)
 	if err != nil {
 		t.Fatal(err)
