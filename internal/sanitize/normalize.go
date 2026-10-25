@@ -98,12 +98,8 @@ func normalizeTextBlock(b claude.Block, role claude.Role) (claude.Block, bool, b
 	txt, _ := b.AsText()
 	text := txt.Text
 	changed := false
-	if strings.Contains(text, "\x1b") {
-		text = StripANSIEscapeCodes(text)
-		changed = true
-	}
-	if strings.Contains(text, "\x00") {
-		text = strings.ReplaceAll(text, "\x00", "")
+	if cleaned, did := cleanTerminalText(text); did {
+		text = cleaned
 		changed = true
 	}
 	if role == claude.RoleAssistant {
@@ -140,16 +136,8 @@ func truncateToolResult(b claude.Block) (claude.Block, bool, bool) {
 		c := asString
 		modified := false
 		truncated := false
-		if strings.Contains(c, "\x1b") {
-			c = StripANSIEscapeCodes(c)
-			modified = true
-		}
-		if strings.Contains(c, "\x00") {
-			c = strings.ReplaceAll(c, "\x00", "")
-			modified = true
-		}
-		if strings.Contains(c, "\x1b") {
-			c = StripANSIEscapeCodes(c)
+		if cleaned, did := cleanTerminalText(c); did {
+			c = cleaned
 			modified = true
 		}
 		if out, did := TruncateMiddle(c); did {
@@ -198,15 +186,8 @@ func truncateToolResult(b claude.Block) (claude.Block, bool, bool) {
 		}
 		if err := json.Unmarshal(item, &blk); err == nil && blk.Type == "text" {
 			pt := blk.Text
-			changedHere := false
-			if strings.Contains(pt, "\x1b") {
-				pt = StripANSIEscapeCodes(pt)
-				changedHere = true
-			}
-			if strings.Contains(pt, "\x00") {
-				pt = strings.ReplaceAll(pt, "\x00", "")
-				changedHere = true
-			}
+			cleaned, changedHere := cleanTerminalText(pt)
+			pt = cleaned
 			if out, did := TruncateMiddle(pt); did {
 				pt = out
 				changedHere = true
@@ -224,15 +205,8 @@ func truncateToolResult(b claude.Block) (claude.Block, bool, bool) {
 		var s string
 		if err := json.Unmarshal(item, &s); err == nil {
 			str := s
-			changedHere := false
-			if strings.Contains(str, "\x1b") {
-				str = StripANSIEscapeCodes(str)
-				changedHere = true
-			}
-			if strings.Contains(str, "\x00") {
-				str = strings.ReplaceAll(str, "\x00", "")
-				changedHere = true
-			}
+			cleaned, changedHere := cleanTerminalText(str)
+			str = cleaned
 			if out, did := TruncateMiddle(str); did {
 				str = out
 				changedHere = true

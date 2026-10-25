@@ -31,8 +31,12 @@ const ToolOutputCharLimit = 65536
 var (
 	pollutedToolCallTextPattern = regexp.MustCompile(`(?i)\[Called tool [^\]]*\]`)
 	multiNewlinePattern         = regexp.MustCompile(`\n{3,}`)
-	ansiEscapePattern           = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\([a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)`)
-	syntheticXMLTagsPattern     = regexp.MustCompile(`(?i)</?task[-_]notification>|(?i)</?task[-_]result>`)
+	// ansiEscapePattern: CSI per ECMA-48 (parameter bytes 0-?, which includes
+	// the private-mode marker of "\x1b[?25l"; intermediates; a final byte),
+	// charset selectors like "\x1b(B", OSC strings ended by BEL or ST, and the
+	// keypad-mode pair "\x1b=" / "\x1b>".
+	ansiEscapePattern       = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b[()][0-9A-Za-z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[=>]`)
+	syntheticXMLTagsPattern = regexp.MustCompile(`(?i)</?task[-_]notification>|(?i)</?task[-_]result>`)
 )
 
 // StripSyntheticXMLTags strips out pseudo-system XML tags such as <task-notification>,
@@ -81,6 +85,26 @@ func StripANSIEscapeCodes(content string) string {
 		return content
 	}
 	return ansiEscapePattern.ReplaceAllString(content, "")
+}
+
+// cleanTerminalText removes ANSI escape sequences and NUL bytes and reports
+// whether anything changed. Stripping runs again after the NULs go: a NUL
+// inside an escape ("\x1b\x00[31m") hides it from the first pass, and the
+// leftover would otherwise surface as a bare "\x1b[31m".
+func cleanTerminalText(s string) (string, bool) {
+	changed := false
+	if strings.Contains(s, "\x1b") {
+		s = StripANSIEscapeCodes(s)
+		changed = true
+	}
+	if strings.Contains(s, "\x00") {
+		s = strings.ReplaceAll(s, "\x00", "")
+		changed = true
+		if strings.Contains(s, "\x1b") {
+			s = StripANSIEscapeCodes(s)
+		}
+	}
+	return s, changed
 }
 
 // extractPlainText concatenates the text of every "text" block in blocks,

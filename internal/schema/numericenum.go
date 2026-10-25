@@ -27,6 +27,7 @@ package schema
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,9 @@ import (
 
 	"claudgravity/internal/ephemeral"
 )
+
+// maxExactInt bounds the float->int fallback to values int64 holds exactly.
+const maxExactInt = 9e18
 
 const (
 	numericEnumStaleAfter = 2 * time.Hour
@@ -216,14 +220,16 @@ func coerceScalar(argsRaw, path, itemType, s string) string {
 				return strconv.FormatInt(n, 10)
 			}
 			argsRaw, _ = sjson.Set(argsRaw, path, n)
-		} else if f, err := strconv.ParseFloat(sTrimmed, 64); err == nil && f == float64(int64(f)) {
+		} else if f, err := strconv.ParseFloat(sTrimmed, 64); err == nil && math.Abs(f) < maxExactInt && f == math.Trunc(f) {
 			if path == "" {
 				return strconv.FormatInt(int64(f), 10)
 			}
 			argsRaw, _ = sjson.Set(argsRaw, path, int64(f))
 		}
 	case "number":
-		if f, err := strconv.ParseFloat(sTrimmed, 64); err == nil {
+		// NaN and ±Inf parse fine but have no JSON spelling; writing them out
+		// would corrupt the whole arguments object.
+		if f, err := strconv.ParseFloat(sTrimmed, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 			if path == "" {
 				return strconv.FormatFloat(f, 'f', -1, 64)
 			}
