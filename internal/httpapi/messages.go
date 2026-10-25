@@ -145,6 +145,12 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		return
 	}
 
+	// 2.3 Self-healing: a Read the client refused as too large is retried
+	// with a smaller window without a model round-trip (readretry.go).
+	if tryReadRetryIntercept(rid, bodyBytes, w) {
+		return
+	}
+
 	// Derived before translation (geminiBody doesn't exist yet) so
 	// DeriveSessionID's own last-resort content-hash fallback has a
 	// stable stand-in to hash against. Namespaced by tenantPrefix so
