@@ -56,7 +56,10 @@ func isAnthropicHost(host string) bool {
 // directly at the one call site below) because ssrf_characterization_test.go
 // is one of this migration's frozen Phase-0 characterization tests and
 // calls it by this exact name — see that test file's own header comment.
-func checkConnectTarget(host string) ([]net.IP, error) {
+//
+// It is a variable only so tests can point a tunnel at a loopback echo
+// server; production code never reassigns it.
+var checkConnectTarget = func(host string) ([]net.IP, error) {
 	return ssrfguard.SafeResolve(host)
 }
 
