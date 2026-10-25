@@ -36,6 +36,74 @@ var classESubnet = &net.IPNet{
 	Mask: net.CIDRMask(4, 32),
 }
 
+// Extra IPv4 ranges that are never a legitimate public target: IETF protocol
+// assignments, benchmarking, the 6to4 relay anycast block and the three
+// documentation (TEST-NET) blocks.
+var reservedV4 = mustCIDRs("192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24")
+
+// reservedV6 are IPv6 ranges refused outright: Teredo (the embedded client
+// address is obfuscated), the discard prefix, deprecated site-local, the
+// documentation prefix and the local-use NAT64 prefix.
+var reservedV6 = mustCIDRs("2001::/32", "100::/64", "fec0::/10", "2001:db8::/32", "64:ff9b:1::/48")
+
+func mustCIDRs(cidrs ...string) []*net.IPNet {
+	out := make([]*net.IPNet, len(cidrs))
+	for i, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(err)
+		}
+		out[i] = n
+	}
+	return out
+}
+
+func inAny(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// blockedIP reports whether ip must never be dialled. IPv6 forms that carry an
+// IPv4 address (NAT64 64:ff9b::/96, 6to4 2002::/16, IPv4-compatible ::a.b.c.d)
+// are judged by the IPv4 address inside them, so a translated loopback or
+// metadata address is refused exactly like the plain one.
+func blockedIP(ip net.IP) bool {
+	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return cgnatSubnet.Contains(v4) || thisNetworkSubnet.Contains(v4) || classESubnet.Contains(v4) || inAny(v4, reservedV4)
+	}
+	v6 := ip.To16()
+	if v6 == nil || inAny(v6, reservedV6) {
+		return true
+	}
+	allZero := func(b []byte) bool {
+		for _, x := range b {
+			if x != 0 {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case v6[0] == 0x00 && v6[1] == 0x64 && v6[2] == 0xff && v6[3] == 0x9b && allZero(v6[4:12]): // 64:ff9b::/96
+		return blockedIP(net.IP(v6[12:16]))
+	case v6[0] == 0x20 && v6[1] == 0x02: // 2002::/16, IPv4 in bytes 2..5
+		return blockedIP(net.IP(v6[2:6]))
+	case allZero(v6[:12]): // ::/96 IPv4-compatible
+		return blockedIP(net.IP(v6[12:16]))
+	}
+	return false
+}
+
+// lookupIP is the DNS seam; tests replace it.
+var lookupIP = net.LookupIP
+
 // SafeResolve resolves host and reports every verified-safe IP it has (IPv4
 // first — a dual-stack answer commonly lists AAAA before A, and a host with
 // no outbound IPv6 route fails if only the first-returned address is ever
@@ -46,7 +114,7 @@ var classESubnet = &net.IPNet{
 func SafeResolve(host string) ([]net.IP, error) {
 	ips := []net.IP{net.ParseIP(host)}
 	if ips[0] == nil {
-		resolved, err := net.LookupIP(host)
+		resolved, err := lookupIP(host)
 		if err != nil {
 			return nil, err
 		}
@@ -56,7 +124,7 @@ func SafeResolve(host string) ([]net.IP, error) {
 		return nil, fmt.Errorf("no addresses found for %s", host)
 	}
 	for _, ip := range ips {
-		if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() || (ip.To4() != nil && (cgnatSubnet.Contains(ip.To4()) || thisNetworkSubnet.Contains(ip.To4()) || classESubnet.Contains(ip.To4()))) {
+		if blockedIP(ip) {
 			return nil, fmt.Errorf("blocked target address: %s", ip)
 		}
 	}

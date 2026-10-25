@@ -5,6 +5,7 @@ package dashboard
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 
 	"claudgravity/internal/accounts"
@@ -39,7 +40,13 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	html := fmt.Sprintf(`<!DOCTYPE html>
+	_, _ = w.Write([]byte(oauthSuccessPage(acc.Email)))
+}
+
+// oauthSuccessPage renders the confirmation page. The e-mail comes from
+// Google's userinfo response, so it is escaped before it goes into HTML.
+func oauthSuccessPage(email string) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head><title>Авторизация успешна</title><meta charset="utf-8"></head>
 <body style="font-family:sans-serif;background:#090d16;color:#f8fafc;padding:40px;text-align:center;">
@@ -47,6 +54,5 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
   <p>Email: <b>%s</b></p>
   <p><a href="/" style="display:inline-block;padding:8px 16px;background:#3b82f6;color:white;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;">Вернуться в консоль</a></p>
 </body>
-</html>`, acc.Email)
-	_, _ = w.Write([]byte(html))
+</html>`, html.EscapeString(email))
 }
