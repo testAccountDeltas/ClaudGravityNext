@@ -93,6 +93,9 @@ type FSM struct {
 	// back to the parent thread's CWD instead) on every streaming
 	// request — which is most Claude Code traffic.
 	cwdKey string
+	// loopKey identifies this agent to LoopGuard (same key the read-loop
+	// bookkeeping uses), so a paged Read can be widened once it was nudged.
+	loopKey string
 
 	// thoughtSignature is the most recent thoughtSignature seen for the
 	// OPEN thinking block, flushed as signature_delta on close.
@@ -154,6 +157,7 @@ func NewFSM(writer *SafeSSEWriter, rid uint64, p *reqctx.Params, st *reqctx.Stat
 		currentIndex:           -1,
 		sessionID:              p.SessionID,
 		cwdKey:                 cwdKey,
+		loopKey:                p.AgentKey + "|" + p.SessionID + "|" + p.InstanceID,
 		requestedSafeguards:    p.HasSafeguards,
 		estInputTokens:         st.EstInputTokens,
 		preferRussian:          p.PreferRussian,

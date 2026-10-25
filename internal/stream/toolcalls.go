@@ -16,6 +16,7 @@ import (
 
 	"claudgravity/internal/editrepair"
 	"claudgravity/internal/logx"
+	"claudgravity/internal/loopguard"
 	"claudgravity/internal/schema"
 	"claudgravity/internal/toolargs"
 	"claudgravity/internal/toolcallid"
@@ -53,6 +54,10 @@ func (f *FSM) HandleFunctionCall(name string, argsRaw string, thoughtSignature s
 	argsRaw = schema.CoerceNumericEnumArgs(f.sessionID, name, argsRaw)
 	if repaired, ok := editrepair.RepairEditToolCall(name, argsRaw, f.cwdKey); ok {
 		argsRaw = repaired
+	}
+	if widened, ok := loopguard.Global().WidenPagedRead(f.loopKey, name, argsRaw); ok {
+		logx.LogGateway("[LoopGuard] widened paged Read to %d lines for %s", loopguard.WidenedReadLimit, f.loopKey)
+		argsRaw = widened
 	}
 	switch strings.ToLower(name) {
 	case "grep":

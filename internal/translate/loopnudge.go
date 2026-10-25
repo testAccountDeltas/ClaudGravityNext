@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"claudgravity/internal/logx"
 	"claudgravity/internal/loopguard"
 	"claudgravity/internal/protocol/claude"
 )
@@ -72,6 +73,7 @@ func applyLoopGuardNudges(req claude.Request, agentKey, sessionID, instanceID st
 	// request on the exact turn that exits Plan Mode.
 	lg.SyncPlanMode(loopKey, isPlanMode)
 	if level := lg.CheckAndResetReadStreak(loopKey, readThreshold); level > 0 {
+		logx.LogGateway("[LoopGuard] read-loop nudge level %d for %s", level, loopKey)
 		nudgeText := loopguard.NudgeReadLoop
 		if level >= 2 {
 			nudgeText = loopguard.NudgeReadLoopEscalated
@@ -118,6 +120,7 @@ func injectNudgeIntoTail(req claude.Request, text string) (claude.Request, bool)
 }
 
 func recordLoopNudge(sessionID, loopKey, text string) {
+	logx.LogGateway("[LoopGuard] nudge could not ride on the request tail, queued for the system prompt (%s)", loopKey)
 	if loopKey != "" {
 		loopguard.RecordPendingNudge(loopKey, text)
 	} else if sessionID != "" {

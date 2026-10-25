@@ -129,6 +129,10 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 				if repaired, ok := editrepair.RepairEditToolCall(fname, argsRaw, cwdKey); ok {
 					argsRaw = repaired
 				}
+				if widened, ok := loopguard.Global().WidenPagedRead(p.AgentKey+"|"+p.SessionID+"|"+p.InstanceID, fname, argsRaw); ok {
+					logx.LogGateway("[LoopGuard] widened paged Read to %d lines for %s", loopguard.WidenedReadLimit, p.AgentKey)
+					argsRaw = widened
+				}
 				switch strings.ToLower(fname) {
 				case "grep":
 					if repaired, ok := editrepair.RepairGrepToolCall(argsRaw); ok {

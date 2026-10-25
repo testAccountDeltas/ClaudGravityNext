@@ -46,13 +46,14 @@ const (
 
 type LoopGuardManager struct {
 	mu            sync.Mutex
-	readWindows   map[string][]int     // agentKey -> recent per-turn Read-tool-call counts (sliding, max ReadWindowSize)
-	toolCallHist  map[string][]string  // agentKey -> list of turn call hashes
-	lastSeen      map[string]time.Time // agentKey -> last activity, for staleness sweeps
-	nudgeCount    map[string]int       // agentKey -> how many read-loop nudges fired since the last genuine Write/Edit; escalates wording instead of staying a one-time whisper
-	editFailures  map[string]int       // agentKey -> consecutive Edit tool_result is_error:true count
-	lastPlanMode  map[string]bool      // agentKey -> whether the last-recorded turn was under Plan Mode's lenient window/threshold
-	pendingNudges map[string][]string  // agentKey/sessionKey -> pending gateway notices to inject into system_instruction
+	readWindows   map[string][]int        // agentKey -> recent per-turn Read-tool-call counts (sliding, max ReadWindowSize)
+	toolCallHist  map[string][]string     // agentKey -> list of turn call hashes
+	lastSeen      map[string]time.Time    // agentKey -> last activity, for staleness sweeps
+	nudgeCount    map[string]int          // agentKey -> how many read-loop nudges fired since the last genuine Write/Edit; escalates wording instead of staying a one-time whisper
+	editFailures  map[string]int          // agentKey -> consecutive Edit tool_result is_error:true count
+	lastPlanMode  map[string]bool         // agentKey -> whether the last-recorded turn was under Plan Mode's lenient window/threshold
+	pendingNudges map[string][]string     // agentKey/sessionKey -> pending gateway notices to inject into system_instruction
+	lastWidened   map[string]widenedRange // agentKey -> the file range its last paged Read was widened to (widenread.go)
 }
 
 var globalLoopGuard = &LoopGuardManager{
@@ -63,6 +64,7 @@ var globalLoopGuard = &LoopGuardManager{
 	editFailures:  make(map[string]int),
 	lastPlanMode:  make(map[string]bool),
 	pendingNudges: make(map[string][]string),
+	lastWidened:   make(map[string]widenedRange),
 }
 
 // Global exposes the package-level singleton to callers outside this
@@ -149,6 +151,7 @@ func (lg *LoopGuardManager) sweepStale() {
 			delete(lg.editFailures, k)
 			delete(lg.lastPlanMode, k)
 			delete(lg.pendingNudges, k)
+			delete(lg.lastWidened, k)
 		}
 	}
 }
