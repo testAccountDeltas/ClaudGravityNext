@@ -326,6 +326,10 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 
 	// 6. Tools Declaration.
 	out, syntheticReasonTools, reverseToolNameMap := applyToolsDeclaration(out, root, tenant, tn, sessionID)
+	if isAgentSummaryFork(root) {
+		out = forbidToolCalls(out)
+		logx.LogGateway("[Tools] background-agent label request: tool calls disabled [%s]", agentKey)
+	}
 
 	// 7-8. Thinking & Output Tokens Configuration, sampling, structured
 	// outputs, safety settings.
