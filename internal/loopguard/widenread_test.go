@@ -26,7 +26,7 @@ func TestWidenPagedRead_LeavesEverythingElseAlone(t *testing.T) {
 	for name, c := range map[string]struct{ tool, args string }{
 		"another tool":      {"Grep", `{"file_path":"/a","limit":10}`},
 		"no limit":          {"Read", `{"file_path":"/a"}`},
-		"already large":     {"Read", `{"file_path":"/a","limit":800}`},
+		"already large":     {"Read", `{"file_path":"/a","limit":500}`},
 		"much larger":       {"Read", `{"file_path":"/a","limit":2000}`},
 		"zero limit":        {"Read", `{"file_path":"/a","limit":0}`},
 		"limit not numeric": {"Read", `{"file_path":"/a","limit":"100"}`},
@@ -84,7 +84,7 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// A dense file makes 800 lines exceed Read's token cap. Once the client
+// A dense file makes 500 lines exceed Read's token cap. Once the client
 // reports that, the agent's widened size halves (never below the floor) and
 // the following paged Reads use it.
 func TestWidenPagedRead_ShrinksAfterAReadWasTooLarge(t *testing.T) {

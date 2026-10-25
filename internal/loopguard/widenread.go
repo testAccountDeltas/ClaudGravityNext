@@ -21,10 +21,10 @@ type widenedRange struct {
 }
 
 // WidenedReadLimit is the minimum line count of a Read that has a limit. It
-// stays well under Read's own output cap (about 25k tokens): at the typical
-// 25-30 tokens per source line that is 20-24k tokens at worst, and a dense
-// file is handled by the retry rule in WidenPagedRead.
-const WidenedReadLimit = 800
+// fits Read's output cap (about 25k tokens) up to ~50 tokens per line: the
+// typical source line is 25-40, 800 lines overflowed on a 38-token file. A denser
+// file is handled by NoteReadTooLarge and the retry rule in WidenPagedRead.
+const WidenedReadLimit = 500
 
 // minWidenedReadLimit is the floor the adaptive shrink in NoteReadTooLarge
 // stops at.
@@ -40,7 +40,7 @@ func (lg *LoopGuardManager) widenLimitLocked(loopKey string) int64 {
 }
 
 // NoteReadTooLarge records that a Read of loopKey came back with "exceeds
-// maximum allowed tokens" (a dense file: long lines make 800 lines more than
+// maximum allowed tokens" (a dense file: long lines make 500 lines more than
 // the ~25k-token cap). The widened size for this agent is halved, down to
 // minWidenedReadLimit, so the next paged Read does not fail the same way.
 func (lg *LoopGuardManager) NoteReadTooLarge(loopKey string) {
