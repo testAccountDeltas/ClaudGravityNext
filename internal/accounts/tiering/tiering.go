@@ -13,6 +13,11 @@ import "strings"
 // requests even when the client explicitly enabled thinking.
 const cheapThinkingBudget = 2048
 
+// maxThinkingBudget is the fixed budget of effort "max" (agy's own table:
+// low 2048, medium 8192, high 16384, max 65536; xhigh is left to the model).
+// applyGenerationConfig lowers it when it would leave no room for the answer.
+const maxThinkingBudget = 65536
+
 // midThinkingBudget caps thinking for compaction/workflow requests.
 const midThinkingBudget = 8192
 
@@ -23,7 +28,9 @@ const midThinkingBudget = 8192
 //   - low -> 2048 (gemini-3.8-flash-low)
 //   - medium -> 8192 (gemini-3.8-flash-medium, safe production default)
 //   - high -> 16384 (gemini-3.8-flash-high)
-//   - xhigh / max / ultracode -> -1 (gemini-3.8-flash-tiered with Native Google ModeAuto)
+//   - xhigh / ultracode -> -1 (gemini-3.8-flash-tiered with Native Google ModeAuto:
+//     the model sizes its own thinking; also the default when no effort is given)
+//   - max -> 65536 (gemini-3.8-flash-tiered, fixed)
 //   - auxiliary -> 2048 (gemini-3.8-flash-low, eliminates 20s stalls on metadata)
 //
 // The levels above only apply when the client ENABLED thinking (thinking.type
@@ -150,20 +157,21 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 					model = base + "-low"
 					budget = 2048
 				}
-			case "medium", "high", "xhigh", "max", "ultracode":
-				if wasTieredClass {
-					model = "gemini-3.8-flash-tiered"
-					budget = -1
-				} else if effort == "medium" {
-					model = base + "-medium"
-					budget = 8192
-				} else if effort == "high" {
-					model = base + "-high"
-					budget = 16384
-				} else {
-					model = "gemini-3.8-flash-tiered"
-					budget = -1 // Native Google ModeAuto
-				}
+			case "medium":
+				// low / medium / high are fixed budgets for every model
+				// class, Opus-class included; only xhigh+ (and no effort at
+				// all) lets the model size its own thinking.
+				model = base + "-medium"
+				budget = 8192
+			case "high":
+				model = base + "-high"
+				budget = 16384
+			case "xhigh", "ultracode":
+				model = "gemini-3.8-flash-tiered"
+				budget = -1 // Native Google ModeAuto
+			case "max":
+				model = "gemini-3.8-flash-tiered"
+				budget = maxThinkingBudget
 			case "none", "off", "disabled":
 				// A Round 15 audit caught that these literal thinking-off
 				// values (as opposed to the standard Anthropic
@@ -317,8 +325,14 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 			// "reason between tool calls"), except for the cheap/fast
 			// classes, which must never get unbounded thinking: they keep
 			// the small budget the tier branch above chose.
+			//
+			// An explicit effort keeps the fixed budget its tier chose
+			// (low 2048 / medium 8192 / high 16384): "adaptive" only says the
+			// client allows thinking, and forcing ModeAuto here made every
+			// effort behave like xhigh. Auto remains for xhigh/ultracode and for no
+			// effort at all.
 			thinkingOn = true
-			if !cheap && !(model == "gemini-2.5-flash" && budget == 0) {
+			if !cheap && !(model == "gemini-2.5-flash" && budget == 0) && (effort == "" || effort == "xhigh" || effort == "ultracode") {
 				budget = -1
 			}
 		default:

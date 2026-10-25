@@ -149,15 +149,15 @@ func TestResolveTieringAndEffort_BareModelAlias(t *testing.T) {
 }
 
 func TestResolveTieringAndEffort_OpusMaxEffort(t *testing.T) {
-	for _, effort := range []string{"max", "xhigh", "ultracode"} {
+	for effort, want := range map[string]int{"max": maxThinkingBudget, "xhigh": -1, "ultracode": -1} {
 		req := map[string]interface{}{
 			"model":         "claude-opus-4-5",
 			"thinking":      map[string]interface{}{"type": "enabled"},
 			"output_config": map[string]interface{}{"effort": effort},
 		}
 		model, budget := ResolveTieringAndEffort(req, "main", "main")
-		if model != "gemini-3.8-flash-tiered" || budget != -1 {
-			t.Fatalf("expected opus with %q effort to map to gemini-3.8-flash-tiered (-1), got model=%q budget=%d", effort, model, budget)
+		if model != "gemini-3.8-flash-tiered" || budget != want {
+			t.Fatalf("expected opus with %q effort to map to gemini-3.8-flash-tiered (%d), got model=%q budget=%d", effort, want, model, budget)
 		}
 	}
 }
