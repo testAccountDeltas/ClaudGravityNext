@@ -7,6 +7,8 @@
 package translate
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -52,9 +54,22 @@ func sanitizeGeminiFunctionName(name string) string {
 		out = "_" + out
 	}
 	if len(out) > 63 {
-		out = out[:63]
+		out = shortenFunctionName(name, out)
 	}
 	return out
+}
+
+// shortenFunctionName fits a name into Gemini's 63 characters. Cutting off the
+// end (what this used to do) throws away the most informative part of an MCP
+// name, "mcp__<server>__<tool>": two tools of one server with a long common
+// prefix became the same string and the model could not tell them apart. Keep
+// the start (which server), a short hash of the whole original name (so the
+// result stays unique), and the end (which tool). The response path maps the
+// short name back through reverseToolNameMap.
+func shortenFunctionName(original, sanitized string) string {
+	const head, tail = 24, 31
+	sum := sha1.Sum([]byte(original))
+	return sanitized[:head] + "_" + hex.EncodeToString(sum[:3]) + "_" + sanitized[len(sanitized)-tail:]
 }
 
 // toolNameInfo is the single source of truth, computed once up front,

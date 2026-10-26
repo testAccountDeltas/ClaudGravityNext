@@ -46,6 +46,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -109,13 +110,19 @@ func main() {
 		logx.LogGateway("[ClaudGravityNext] Notice: auths dir init: %v", err)
 	}
 
+	// Conversation → account bindings survive a restart (they keep each
+	// conversation on the account that holds its prompt cache).
+	affinityPath := filepath.Join(filepath.Dir(*authDir), "session_affinity.json")
+	accounts.GlobalSelector().StartAffinityPersistence(affinityPath, 10*time.Second)
+
 	// Kick off an initial background quota refresh for all accounts in the pool
 	// so the dashboard and the account selector immediately have real, fresh
 	// Google quota numbers and accurate cooldown states from startup.
 	go accounts.Manager().RefreshAllQuotas()
 
 	if _, err := accounts.Manager().FetchAvailableModels(false); err != nil {
-		logx.LogGateway("[ClaudGravityNext] Warning: initial model catalog fetch failed: %v", err)
+		logx.LogGateway("[ClaudGravityNext] Warning: initial model catalog fetch failed (retrying in the background): %v", err)
+		go retryModelCatalog()
 	} else {
 		logx.LogGateway("[ClaudGravityNext] Model catalog loaded (context window / output ceilings)")
 	}
@@ -203,6 +210,7 @@ func main() {
 				_ = mitmSrvs.tls.Shutdown(ctx)
 			}
 		}
+		accounts.GlobalSelector().SaveAffinity(affinityPath)
 		requestlog.Close()
 	}()
 

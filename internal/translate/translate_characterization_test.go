@@ -447,8 +447,8 @@ func TestConvertThinkingBlock_RecoversSignatureFromSessionFallback(t *testing.T)
 
 func TestConvertRedactedThinkingBlock_OlderTurnDropsSignature(t *testing.T) {
 	parts := convertRedactedThinkingBlock("assistant", false, true)
-	if gjson.Get(parts[0], "thought").Exists() {
-		t.Fatalf("an older redacted_thinking turn must degrade to plain text, got %v", parts)
+	if len(parts) != 0 {
+		t.Fatalf("an older redacted_thinking block must be dropped, not narrated, got %v", parts)
 	}
 	parts = convertRedactedThinkingBlock("assistant", true, true)
 	if !gjson.Get(parts[0], "thought").Bool() {
@@ -461,8 +461,8 @@ func TestConvertRedactedThinkingBlock_OlderTurnDropsSignature(t *testing.T) {
 // text — thought:true is rejected on ANY part in request history there.
 func TestConvertRedactedThinkingBlock_PublicAPIKeyModeDegradesToText(t *testing.T) {
 	parts := convertRedactedThinkingBlock("assistant", true, false)
-	if gjson.Get(parts[0], "thought").Exists() {
-		t.Fatalf("expected plain text on the public API key path, got %v", parts)
+	if len(parts) != 0 {
+		t.Fatalf("expected the block to be dropped on the public API key path, got %v", parts)
 	}
 }
 
@@ -1147,5 +1147,45 @@ func TestConvert_NestedScreenshotsPrunedUnderInlineLimit(t *testing.T) {
 	}
 	if !res.WasShrunk {
 		t.Fatal("pruning must be reported as shrink and persisted even with no message drop")
+	}
+}
+
+func TestSanitizeGeminiFunctionName_LongNameKeepsServerAndToolAndStaysUnique(t *testing.T) {
+	a := "mcp__a_very_long_server_name_for_testing_purposes__list_all_the_open_pull_requests"
+	b := "mcp__a_very_long_server_name_for_testing_purposes__list_all_the_open_pull_issues__"
+	ga, gb := sanitizeGeminiFunctionName(a), sanitizeGeminiFunctionName(b)
+	for _, g := range []string{ga, gb} {
+		if len(g) != 63 || !strings.HasPrefix(g, "mcp__a_very_long_server_") {
+			t.Fatalf("expected 63 chars starting with the server: %q (%d)", g, len(g))
+		}
+	}
+	if ga == gb {
+		t.Fatalf("two different tools collapsed into %q", ga)
+	}
+	if !strings.HasSuffix(ga, "open_pull_requests") || !strings.HasSuffix(sanitizeGeminiFunctionName(b), "pull_issues__") {
+		t.Fatalf("the tool name (the end) must survive: %q / %q", ga, gb)
+	}
+	if sanitizeGeminiFunctionName(a) != ga {
+		t.Fatal("not deterministic")
+	}
+	short := "mcp__brave-search__search"
+	if sanitizeGeminiFunctionName(short) != "mcp__brave_search__search" {
+		t.Fatal("a short name must be left alone")
+	}
+}
+
+func TestDeferredToolPlaceholderIsNotDeclared(t *testing.T) {
+	req := `{"model":"claude-opus-4-5","max_tokens":64,"tools":[` +
+		`{"name":"Read","description":"r","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}}}},` +
+		`{"name":"DeferredToolPlaceholder","description":"p","defer_loading":true,"input_schema":{"type":"object","properties":{}}}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`
+	res, err := ConvertClaudeRequestToGemini([]byte(req), config.TenantConfig{}, "main", "main", "s", "i", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range gjson.GetBytes(res.GeminiBody, "tools.0.functionDeclarations").Array() {
+		if d.Get("name").String() == "DeferredToolPlaceholder" {
+			t.Fatalf("the placeholder was declared: %s", d.Raw)
+		}
 	}
 }

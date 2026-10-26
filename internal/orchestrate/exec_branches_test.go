@@ -139,3 +139,13 @@ func TestExecute_All429_TriesMinOfPoolAndEight(t *testing.T) {
 		})
 	}
 }
+
+// When every account is dropped only because its token could not be refreshed,
+// the client must not be told it was rate limited: the quota is fine.
+func TestExecute_AllRefreshesFail_IsServiceUnavailableNotARateLimit(t *testing.T) {
+	r := runExec(t, execOpts{nAcc: 2, refreshFail: map[string]bool{"ref1": true, "ref2": true},
+		up: func(int, *http.Request, string) (*http.Response, error) { return goodResp() }})
+	if r.ok || r.status != http.StatusServiceUnavailable || r.attempts != 0 {
+		t.Fatalf("ok=%v status=%d attempts=%d err=%v", r.ok, r.status, r.attempts, r.err)
+	}
+}

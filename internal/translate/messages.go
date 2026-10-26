@@ -87,11 +87,19 @@ func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigra
 				case "tool_use":
 					partsJSON = append(partsJSON, convertToolUseBlock(p, role, tn, isAntigravity, content, sessionID)...)
 				case "server_tool_use":
-					partsJSON = append(partsJSON, convertServerToolUseBlock(p)...)
+					// In a MODEL turn this is a call real Claude made (the
+					// conversation was moved to Gemini). A bracketed
+					// "[Executed server tool ...]" text part there is what
+					// Gemini copies back as its own output: drop it.
+					if role != "assistant" {
+						partsJSON = append(partsJSON, convertServerToolUseBlock(p)...)
+					}
 				case "tool_result":
 					partsJSON = append(partsJSON, convertToolResultBlock(p, role, toolIDToName, tn, root)...)
 				case "web_search_tool_result":
-					partsJSON = append(partsJSON, convertWebSearchToolResultBlock(p)...)
+					if role != "assistant" { // see server_tool_use above
+						partsJSON = append(partsJSON, convertWebSearchToolResultBlock(p)...)
+					}
 				case "thinking":
 					partsJSON = append(partsJSON, convertThinkingBlock(p, role, isLastAssistantMsg, content, isAntigravity, sessionID)...)
 				case "redacted_thinking":

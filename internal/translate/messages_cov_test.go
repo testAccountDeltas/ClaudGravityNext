@@ -100,8 +100,8 @@ func TestCovTranslateMessagesToolRoundTrip(t *testing.T) {
 	if gjson.Get(out, "contents.1.parts.1.functionCall.name").String() != "Read" {
 		t.Fatalf("functionCall missing: %s", out)
 	}
-	if !strings.Contains(gjson.Get(out, "contents.1.parts.2.text").String(), "[Executed server tool web_search") {
-		t.Fatalf("server tool use must degrade to text: %s", out)
+	if strings.Contains(out, "Executed server tool") {
+		t.Fatalf("a server tool use must not be narrated in the model turn: %s", out)
 	}
 	// functionResponse parts are sealed apart from plain text parts.
 	var fr, errResp int
@@ -136,5 +136,19 @@ func TestCovTranslateMessagesThoughtPartsReorderedFirst(t *testing.T) {
 	first := gjson.Get(out, "contents.0.parts.0")
 	if !first.Get("thought").Bool() {
 		t.Fatalf("thought part must lead the merged model turn: %s", out)
+	}
+}
+
+// Server blocks of a conversation that ran on real Claude are dropped from the
+// MODEL turn only; in a user turn they stay as labelled text.
+func TestServerBlocksOfRealClaudeHistory_DroppedOnlyFromModelTurns(t *testing.T) {
+	body := `{"messages":[{"role":"user","content":"find it"},` +
+		`{"role":"assistant","content":[{"type":"server_tool_use","id":"s1","name":"web_search","input":{"query":"q"}},` +
+		`{"type":"web_search_tool_result","tool_use_id":"s1","content":[{"type":"web_search_result","title":"T","url":"https://t.example","snippet":"snip"}]},` +
+		`{"type":"text","text":"Found it."}]}]}`
+	out := covTranslate(body, toolNameInfo{}, false)
+	model := gjson.Get(out, "contents.1.parts").Raw
+	if strings.Contains(model, "Executed server tool") || strings.Contains(model, "Web Search Results") || !strings.Contains(model, "Found it.") {
+		t.Fatalf("model turn: %s", model)
 	}
 }

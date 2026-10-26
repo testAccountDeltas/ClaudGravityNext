@@ -137,7 +137,10 @@ func convertThinkingBlock(p gjson.Result, role string, isLastAssistantMsg bool, 
 // treat it as thought:true.
 func convertRedactedThinkingBlock(role string, isLastAssistantMsg bool, isAntigravity bool) []string {
 	if !isAntigravity || role != "assistant" || !isLastAssistantMsg {
-		return []string{`{"text":"[Prior reasoning redacted]"}`}
+		// Nothing real to translate, and a "[Prior reasoning redacted]" text
+		// part in a MODEL turn is exactly the kind of narration Gemini copies
+		// back as its own output: drop the block.
+		return nil
 	}
 	return []string{`{"thought":true,"thoughtSignature":"skip_thought_signature_validator","text":"[Prior reasoning redacted]"}`}
 }

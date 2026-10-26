@@ -61,6 +61,12 @@ func applyToolsDeclaration(out string, root gjson.Result, tenant config.TenantCo
 			logDroppedServerTool(name, t.Get("type").String())
 			return true
 		}
+		// Claude Code's stand-in that keeps the tool list non-empty while its
+		// real tools are deferred. It is not a tool: declared to Gemini it
+		// invites calls the client answers with "No such tool available".
+		if name == "DeferredToolPlaceholder" {
+			return true
+		}
 		if tenant.StripSearchTools && DropSearchTools[name] && name != forcedToolName && !tn.keepSearchToolsForForcedAny {
 			return true
 		}

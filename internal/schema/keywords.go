@@ -214,6 +214,17 @@ func stripKeysNotInAllowlist(jsonStr string) string {
 // constraint (dependentRequired, dependencies, dependentSchemas) uses its
 // compact JSON form as the hint text, lossy but strictly better than total
 // silence.
+// isJSSafeIntegerBound reports the bounds Zod adds to every integer field
+// (minimum/maximum = -/+9007199254740991, JavaScript's safe integer range).
+// They say nothing the model needs and were appended to the description of
+// every integer parameter as "(maximum: 9007199254740991)".
+func isJSSafeIntegerBound(key string, val gjson.Result) bool {
+	if key != "minimum" && key != "maximum" {
+		return false
+	}
+	return val.Type == gjson.Number && (val.Num == 9007199254740991 || val.Num == -9007199254740991)
+}
+
 func moveConstraintsToDescription(jsonStr string) string {
 	pathsByField := findPathsByFields(jsonStr, unsupportedConstraints)
 	for _, key := range unsupportedConstraints {
@@ -224,6 +235,9 @@ func moveConstraintsToDescription(jsonStr string) string {
 			}
 			parentPath := trimSuffix(p, "."+key)
 			if isPropertyDefinition(parentPath) {
+				continue
+			}
+			if isJSSafeIntegerBound(key, val) {
 				continue
 			}
 			if val.IsObject() || val.IsArray() {

@@ -101,6 +101,7 @@ func (o *Orchestrator) execute(ctx context.Context, p *reqctx.Params, st *reqctx
 	}
 
 	excludedAccounts := make(map[string]bool)
+	refreshFailed := make(map[string]bool) // accounts left out because their token could not be refreshed
 	var lastErr error
 	lastStatus := http.StatusBadGateway
 	success := false
@@ -147,6 +148,13 @@ func (o *Orchestrator) execute(ctx context.Context, p *reqctx.Params, st *reqctx
 				// normal 429/unified-reset countdown.
 				lastErr = err
 				lastStatus = http.StatusTooManyRequests
+				if len(refreshFailed) > 0 && len(refreshFailed) == len(excludedAccounts) {
+					// Every account was dropped because its token could not be
+					// refreshed (DNS, network, revoked grant): the quota is
+					// fine, so this is not a rate limit and must not start the
+					// client's 429 countdown.
+					lastStatus = http.StatusServiceUnavailable
+				}
 				break
 			}
 			attemptState.ActiveAccount = acc
@@ -154,6 +162,7 @@ func (o *Orchestrator) execute(ctx context.Context, p *reqctx.Params, st *reqctx
 			if err != nil {
 				logx.LogGateway("[#%d] !! Token refresh failed for %s: %v (rotating account, attempt not consumed)", p.RID, acc.Email, err)
 				excludedAccounts[acc.Email] = true
+				refreshFailed[acc.Email] = true
 				lastErr = err
 				// An OAuth failure is the account's problem, not a request
 				// attempt: excludedAccounts grows each time, so this is bounded

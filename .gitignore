@@ -1,5 +1,6 @@
 # ===== Секреты и реальные учётные данные — НИКОГДА не коммитить =====
 config.json
+session_affinity.json
 auths/*.json
 auths/**/*.json
 certs/

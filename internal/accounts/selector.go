@@ -34,6 +34,7 @@ type AccountSelector struct {
 	affinityIdx   map[string]*list.Element // conversationAnchor/sessionID -> its node in affinityLRU
 	roundRobinIdx int
 	recentPicks   []string // last recentPicksWindow selected emails (selector_spread.go)
+	newConvPicks  []newConvPick
 }
 
 var globalSelector = &AccountSelector{
@@ -185,8 +186,18 @@ func (as *AccountSelector) selectLocked(apiKey string, conversationKey string, t
 					// Bound sticky skew for new sessions (selector_spread.go).
 					if alt := as.spreadAlternativeLocked(acc, accountList, isExcluded, model); alt != nil {
 						as.setStickyLocked(apiKey, alt.Email)
+						as.noteNewConvLocked(conversationKey, alt.Email, now)
 						return alt, nil
 					}
+					// A burst of new conversations (parallel subagents) is spread
+					// over the pool instead of all taking the sticky account.
+					if conversationKey != "" {
+						if alt := as.burstAlternativeLocked(acc, accountList, isExcluded, model, now); alt != nil {
+							as.noteNewConvLocked(conversationKey, alt.Email, now)
+							return alt, nil
+						}
+					}
+					as.noteNewConvLocked(conversationKey, acc.Email, now)
 					return acc, nil
 				}
 			}

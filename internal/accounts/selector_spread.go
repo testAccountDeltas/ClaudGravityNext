@@ -4,13 +4,72 @@
 // quota and drag the pool into mass cooldown.
 package accounts
 
+import "time"
+
 const (
+	// A burst of parallel subagents is a burst of NEW conversations: each has
+	// its own anchor, finds no affinity, and falls to the per-API-key sticky
+	// account, so the whole fleet used to land on one account before the share
+	// rule above (counted over every pick, hits included) noticed. A new
+	// conversation shares no cache with its siblings, so spreading them costs
+	// nothing and keeps one account's rate limit and quota from taking all of
+	// the load.
+	newConvBurstWindow = 60 * time.Second
+	newConvBurstLimit  = 3 // new conversations one account may take per window before the next goes elsewhere
+
 	recentPicksWindow = 64   // last N selections tracked
 	spreadMinSamples  = 12   // do not judge skew on fewer samples
 	spreadShareLimit  = 0.5  // sticky account above this share of recent picks counts as overloaded
 	spreadQuotaMargin = 0.25 // sticky account this far below the best candidate's quota fraction loses new sessions
 	spreadMinFraction = 0.1  // never spread onto an account this close to exhaustion
 )
+
+type newConvPick struct {
+	email string
+	at    time.Time
+}
+
+// recordNewConvLocked remembers that a NEW conversation was just given email.
+func (as *AccountSelector) recordNewConvLocked(email string, now time.Time) {
+	kept := as.newConvPicks[:0]
+	for _, p := range as.newConvPicks {
+		if now.Sub(p.at) < newConvBurstWindow {
+			kept = append(kept, p)
+		}
+	}
+	as.newConvPicks = append(kept, newConvPick{email: email, at: now})
+}
+
+func (as *AccountSelector) recentNewConvCountLocked(email string, now time.Time) int {
+	n := 0
+	for _, p := range as.newConvPicks {
+		if p.email == email && now.Sub(p.at) < newConvBurstWindow {
+			n++
+		}
+	}
+	return n
+}
+
+// burstAlternativeLocked returns the account to give the next NEW conversation
+// to when cur already took newConvBurstLimit of them within the window, or nil.
+func (as *AccountSelector) burstAlternativeLocked(cur *Record, list []*Record, isExcluded func(*Record) bool, model string, now time.Time) *Record {
+	curCount := as.recentNewConvCountLocked(cur.Email, now)
+	if curCount < newConvBurstLimit {
+		return nil
+	}
+	var best *Record
+	bestCount := curCount
+	for _, acc := range list {
+		if acc.Email == cur.Email || isExcluded(acc) || !availableFor(acc, model) || getEffectiveQuotaFraction(acc) < spreadMinFraction {
+			continue
+		}
+		c := as.recentNewConvCountLocked(acc.Email, now)
+		if c < bestCount || (best != nil && c == bestCount && getEffectiveQuotaFraction(acc) > getEffectiveQuotaFraction(best)) {
+			best, bestCount = acc, c
+		}
+	}
+	return best
+}
 
 // recordPickLocked remembers that email was just selected (as.mu held).
 func (as *AccountSelector) recordPickLocked(email string) {
@@ -67,4 +126,12 @@ func (as *AccountSelector) spreadAlternativeLocked(cur *Record, list []*Record, 
 		return leastUsed
 	}
 	return nil
+}
+
+// noteNewConvLocked counts a pick that started a conversation (one with an
+// anchor); picks without an anchor cannot be told apart and are not counted.
+func (as *AccountSelector) noteNewConvLocked(conversationKey, email string, now time.Time) {
+	if conversationKey != "" {
+		as.recordNewConvLocked(email, now)
+	}
 }
