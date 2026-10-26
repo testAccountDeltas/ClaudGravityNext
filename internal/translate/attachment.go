@@ -21,7 +21,8 @@ import (
 )
 
 // geminiImageTypes are the image MIME types Gemini accepts as inlineData
-// (GIF, BMP, TIFF and friends are NOT supported).
+// (BMP, TIFF and friends are NOT supported; GIF is converted to PNG first,
+// see gifconv.go).
 var geminiImageTypes = map[string]bool{
 	"image/png": true, "image/jpeg": true, "image/webp": true,
 	"image/heic": true, "image/heif": true,
@@ -96,6 +97,16 @@ func classifyAttachment(ptype, mediaType, name string, raw []byte, b64 string) (
 		}
 		return "", false, string(raw)
 	case kind == "image":
+		// Gemini cannot take GIF: send the first frame as PNG instead. The
+		// bytes decide, not the label (a GIF declared as image/png converts
+		// too).
+		if sniffMIME(raw) == "image/gif" {
+			converted, err := gifFirstFrameToPNG(raw)
+			if err != nil {
+				return "", false, omitted("image", "could not convert image/gif to PNG: "+err.Error())
+			}
+			raw, mt, b64 = converted, "image/png", ""
+		}
 		if !geminiImageTypes[mt] {
 			return "", false, omitted("image", "unsupported type "+mt)
 		}

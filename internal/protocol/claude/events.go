@@ -43,7 +43,7 @@ type CitationDelta struct {
 }
 
 type ContentBlockDelta struct {
-	Type string `json:"type"` // "text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta" | "citation_delta"
+	Type string `json:"type"` // "text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta" | "citations_delta"
 	// Exactly one of these is populated, selected by Type.
 	Text        string         `json:"text,omitempty"`
 	PartialJSON string         `json:"partial_json,omitempty"`

@@ -84,8 +84,8 @@ func attach(t *testing.T, ptype, mt, data string) string {
 
 func TestAttachmentMIMEPolicy(t *testing.T) {
 	gif := b64("GIF89a\x01\x00\x01\x00")
-	if p := attach(t, "image", "image/gif", gif); gjson.Get(p, "inlineData").Exists() || !strings.Contains(gjson.Get(p, "text").String(), "[image omitted: unsupported type image/gif]") {
-		t.Fatalf("gif must be a placeholder: %s", p)
+	if p := attach(t, "image", "image/gif", gif); gjson.Get(p, "inlineData").Exists() || !strings.Contains(gjson.Get(p, "text").String(), "[image omitted: could not convert image/gif to PNG") {
+		t.Fatalf("a broken gif must be a placeholder: %s", p)
 	}
 	if p := attach(t, "image", "image/png", tinyPNGB64); gjson.Get(p, "inlineData.mimeType").String() != "image/png" {
 		t.Fatalf("png must be inlineData: %s", p)
