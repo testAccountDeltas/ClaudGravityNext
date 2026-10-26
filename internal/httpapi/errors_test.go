@@ -173,3 +173,22 @@ func TestRetryAfterCountsExhaustedQuotaBuckets(t *testing.T) {
 		t.Errorf("a healthy account = %v, want 30s", d)
 	}
 }
+
+// A 429 on one model leaves the account open for others, so the account-wide
+// figure said "retry in 30 s" while the model the client wanted was blocked for
+// hours. With the model known, its cooldown decides.
+func TestRetryAfterFollowsTheModelCooldown(t *testing.T) {
+	now := time.Now()
+	a := &accounts.Record{ModelCooldowns: map[string]time.Time{"gemini-3.8-flash-tiered": now.Add(10 * time.Minute)}}
+	b := &accounts.Record{ModelCooldowns: map[string]time.Time{"gemini-3.8-flash-tiered": now.Add(4 * time.Minute)}}
+	recs := []*accounts.Record{a, b}
+	if d := retryAfterFromRecordsFor(recs, now, "gemini-3.8-flash-tiered"); d < 239*time.Second || d > 241*time.Second {
+		t.Fatalf("soonest model cooldown = %v, want about 4m", d)
+	}
+	if d := retryAfterFromRecordsFor(recs, now, "gemini-3.8-flash-low"); d != 30*time.Second {
+		t.Fatalf("another model is free: %v", d)
+	}
+	if d := retryAfterFromRecords(recs, now); d != 30*time.Second {
+		t.Fatalf("without a model the account-wide view applies: %v", d)
+	}
+}

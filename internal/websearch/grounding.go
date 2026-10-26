@@ -168,6 +168,10 @@ func searchWithGoogleGrounding(
 		}
 	}
 
+	// Sources come back as redirects through Google's own service; show the
+	// real pages instead (bounded, best effort).
+	resolveGroundingRedirects(ctx, httpClient, results)
+
 	if len(results) == 0 && summaryText != "" {
 		results = append(results, WebSearchResultItem{
 			Title:   "Web Search: " + query,

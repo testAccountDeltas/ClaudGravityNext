@@ -285,7 +285,7 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		}
 		// The raw upstream text (possibly Google JSON) stays in the log
 		// line above; the client gets a short sanitised message.
-		WriteAnthropicError(w, status, anthropicerr.TypeForStatus(status), ClientUpstreamMessage(status, execErr.Error()))
+		WriteAnthropicErrorForModel(w, status, anthropicerr.TypeForStatus(status), ClientUpstreamMessage(status, execErr.Error()), result.ResolvedModel)
 	}
 }
 

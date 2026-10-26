@@ -112,6 +112,16 @@ func (as *AccountSelector) EarliestAvailability(model string) time.Time {
 	return best
 }
 
+// AvailableAtFor is AvailableAt plus the (account, model) cooldown a 429 on that
+// model left behind. An empty model means no model-specific gate.
+func (a *Record) AvailableAtFor(model string, now time.Time) time.Time {
+	at := a.AvailableAt(now)
+	if m := modelCooldownUntil(a, model, now); m.After(at) {
+		at = m
+	}
+	return at
+}
+
 // AvailableAt returns the moment the account stops being blocked by its
 // account-wide cooldown and by exhausted quota buckets; now (or earlier) means
 // it is usable. Per-model cooldowns are not included (see EarliestAvailability).

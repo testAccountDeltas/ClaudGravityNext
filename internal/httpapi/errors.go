@@ -64,6 +64,13 @@ func setSplitTokenRateLimitHeaders(header http.Header, tokLimit int, remainingFr
 // nothing to count down to, a strict client dividing by a missing *-limit
 // header).
 func WriteAnthropicError(w http.ResponseWriter, status int, errType, message string) {
+	WriteAnthropicErrorForModel(w, status, errType, message, "")
+}
+
+// WriteAnthropicErrorForModel is WriteAnthropicError for a request that wanted
+// a specific model: a 429 then carries the Retry-After of that model's
+// cooldowns rather than a generic figure.
+func WriteAnthropicErrorForModel(w http.ResponseWriter, status int, errType, message, model string) {
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
 	h.Set("anthropic-version", "2023-06-01")
@@ -97,7 +104,7 @@ func WriteAnthropicError(w http.ResponseWriter, status int, errType, message str
 		// for a 429/RESOURCE_EXHAUSTED account elsewhere in this gateway —
 		// a client honoring Retry-After literally that retries in 5s (the
 		// old value) hits the exact same cooldown again immediately.
-		ra := poolRetryAfter()
+		ra := poolRetryAfter(model)
 		h.Set("Retry-After", fmt.Sprintf("%d", int(ra.Seconds())))
 		if h.Get("anthropic-ratelimit-unified-reset") == "" {
 			h.Set("anthropic-ratelimit-unified-reset", fmt.Sprintf("%d", time.Now().Add(ra).Unix()))

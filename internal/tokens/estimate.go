@@ -28,11 +28,21 @@ func WeightedRequestTokensFor(req claude.Request, prof Profile) int {
 	total += weightedMessagesTokens(req.Messages, prof)
 	total += weightedToolsTokens(req.Tools)
 
+	// Calibration from the live drift log (estimate / Gemini's promptTokenCount
+	// over 7617 requests): median 0.989, p5 0.873, p95 1.149, i.e. about half of
+	// the requests were estimated BELOW what Gemini counted, while the target
+	// band is [1.00, 1.30]. One multiplier moves the median to about 1.03 and
+	// leaves the upper tail near 1.20.
+	total = int(float64(total) * estimateCalibration)
+
 	if total < 1 {
 		return 1
 	}
 	return total
 }
+
+// estimateCalibration scales the weighted estimate; see WeightedRequestTokensFor.
+const estimateCalibration = 1.04
 
 func weightedSystemTokens(sys claude.SystemPrompt) int {
 	if len(sys) == 0 {

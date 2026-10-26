@@ -22,15 +22,23 @@ const (
 // [1s, 15min]. With an empty/unavailable pool it falls back to 15 minutes
 // (the old fixed value); with a healthy pool and no cooldown (the 429 came
 // from elsewhere) it returns a short 30s.
-func poolRetryAfter() time.Duration {
+func poolRetryAfter(model string) time.Duration {
 	mgr := accounts.Manager()
 	if mgr == nil {
 		return defaultRetryAfter
 	}
-	return retryAfterFromRecords(mgr.GetAccounts(), time.Now())
+	return retryAfterFromRecordsFor(mgr.GetAccounts(), time.Now(), model)
 }
 
 func retryAfterFromRecords(recs []*accounts.Record, now time.Time) time.Duration {
+	return retryAfterFromRecordsFor(recs, now, "")
+}
+
+// retryAfterFromRecordsFor is retryAfterFromRecords for a request that wanted
+// model: an account whose every route to that model is cooling down (a 429 on
+// that model only) counts as unavailable until the cooldown ends, instead of
+// being reported as free just because the account-wide gates are open.
+func retryAfterFromRecordsFor(recs []*accounts.Record, now time.Time, model string) time.Duration {
 	if len(recs) == 0 {
 		return defaultRetryAfter
 	}
@@ -44,7 +52,7 @@ func retryAfterFromRecords(recs []*accounts.Record, now time.Time) time.Duration
 		// Account-wide cooldown AND exhausted quota buckets: an account whose
 		// five-hour bucket is empty is not "usable right now" just because
 		// its CooldownUntil has not been set.
-		if at := a.AvailableAt(now); at.After(now) {
+		if at := a.AvailableAtFor(model, now); at.After(now) {
 			d := at.Sub(now)
 			if !found || d < soonest {
 				soonest, found = d, true
