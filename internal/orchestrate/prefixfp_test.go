@@ -91,3 +91,19 @@ func TestLogPrefixChange_IsSafeAndBounded(t *testing.T) {
 	logPrefixChange(3, key, fpBody(`[1]`, "s", fpMsgs(12)...))
 	logPrefixChange(4, key, fpBody(`[1,2]`, "s2", append([]string{fpMsg("user", "CHANGED", "")}, fpMsgs(14)[1:]...)...)) // must log, not panic
 }
+
+func TestDiffToolNames(t *testing.T) {
+	if got := diffToolNames([]string{"Read", "Bash"}, []string{"Read", "Bash", "TaskUpdate"}); got != "added=TaskUpdate removed=" {
+		t.Fatalf("added: %q", got)
+	}
+	if got := diffToolNames([]string{"Read", "Bash"}, []string{"Read"}); got != "added= removed=Bash" {
+		t.Fatalf("removed: %q", got)
+	}
+	if got := diffToolNames([]string{"Read", "Bash"}, []string{"Bash", "Read"}); got != "same names, order or a schema changed" {
+		t.Fatalf("reordered: %q", got)
+	}
+	fp := fingerprintBody([]byte(`{"tools":[{"functionDeclarations":[{"name":"Read"},{"name":"Bash"}]}],"contents":[]}`))
+	if len(fp.toolNames) != 2 || fp.toolNames[0] != "Read" {
+		t.Fatalf("toolNames = %v", fp.toolNames)
+	}
+}

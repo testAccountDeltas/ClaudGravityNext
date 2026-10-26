@@ -12,6 +12,7 @@ package orchestrate
 import (
 	"hash/fnv"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tidwall/gjson"
@@ -24,6 +25,7 @@ type prefixFP struct {
 	tools, system uint64
 	msgs          []uint64
 	raw           []string // kept in memory only to describe the first difference
+	toolNames     []string // declared function names, in order (names only)
 }
 
 const (
@@ -52,6 +54,10 @@ func fingerprintBody(body []byte) *prefixFP {
 		tools:  hash64(gjson.GetBytes(body, "tools").Raw),
 		system: hash64(gjson.GetBytes(body, "system_instruction").Raw + gjson.GetBytes(body, "systemInstruction").Raw),
 	}
+	gjson.GetBytes(body, "tools.0.functionDeclarations").ForEach(func(_, d gjson.Result) bool {
+		fp.toolNames = append(fp.toolNames, d.Get("name").String())
+		return true
+	})
 	gjson.GetBytes(body, "contents").ForEach(func(_, c gjson.Result) bool {
 		fp.msgs = append(fp.msgs, hash64(c.Raw))
 		if len(c.Raw) <= prefixMaxRawKeep {
@@ -101,6 +107,36 @@ func describeDiff(prev, cur string) string {
 	return "part content"
 }
 
+// diffToolNames describes how the declared tools changed: which were added,
+// which removed, or that only their order / schemas differ.
+func diffToolNames(prev, cur []string) string {
+	has := func(list []string) map[string]bool {
+		m := make(map[string]bool, len(list))
+		for _, n := range list {
+			m[n] = true
+		}
+		return m
+	}
+	pm, cm := has(prev), has(cur)
+	var added, removed []string
+	for _, n := range cur {
+		if !pm[n] {
+			added = append(added, n)
+		}
+	}
+	for _, n := range prev {
+		if !cm[n] {
+			removed = append(removed, n)
+		}
+	}
+	switch {
+	case len(added) == 0 && len(removed) == 0:
+		return "same names, order or a schema changed"
+	default:
+		return "added=" + strings.Join(added, ",") + " removed=" + strings.Join(removed, ",")
+	}
+}
+
 // logPrefixChange compares body with the previous request of the same
 // conversation and logs when the start of the request changed.
 func logPrefixChange(rid uint64, convKey string, body []byte) {
@@ -129,8 +165,11 @@ func logPrefixChange(rid uint64, convKey string, body []byte) {
 		return
 	}
 	what := ""
+	if toolsChanged {
+		what = " (" + diffToolNames(prev.toolNames, cur.toolNames) + ")"
+	}
 	if abnormal {
-		what = " firstDiffMsg=" + strconv.Itoa(d) + " of " + strconv.Itoa(len(cur.msgs)) + " (previous request had " +
+		what += " firstDiffMsg=" + strconv.Itoa(d) + " of " + strconv.Itoa(len(cur.msgs)) + " (previous request had " +
 			strconv.Itoa(len(prev.msgs)) + ") differs in: " + describeDiff(prev.raw[d], cur.raw[d])
 	}
 	logx.LogGateway("[#%d] [Prefix] the start of this request differs from the previous one of the same conversation: tools=%v system=%v%s; "+
