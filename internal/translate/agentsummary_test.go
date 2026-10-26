@@ -45,6 +45,9 @@ func TestAgentSummaryFork_OutputIsBounded(t *testing.T) {
 	if got <= 0 || got > agentSummaryAnswerRoom+int64(res.ThinkingBudget)+1 {
 		t.Fatalf("maxOutputTokens = %d (thinking budget %d)", got, res.ThinkingBudget)
 	}
+	if got := gjson.GetBytes([]byte(capAgentSummaryOutput(`{"generationConfig":{"maxOutputTokens":128000}}`, -1)), "generationConfig.maxOutputTokens").Int(); got != agentSummaryAutoThinkingRoom {
+		t.Fatalf("automatic thinking: %d", got)
+	}
 	// An ordinary request keeps its own allowance.
 	plain := strings.Replace(req, "Describe your most recent action in 3-5 words using present tense (-ing). Do not use tools.", "continue", 1)
 	res, _ = ConvertClaudeRequestToGemini([]byte(plain), config.TenantConfig{}, "main", "main", "s", "i", true)

@@ -52,13 +52,22 @@ func isAgentSummaryFork(root gjson.Result) bool {
 // of whatever thinking the request is allowed.
 const agentSummaryAnswerRoom = 768
 
+// agentSummaryAutoThinkingRoom is the whole output allowance of a label request
+// whose thinking budget is automatic.
+const agentSummaryAutoThinkingRoom = 6144
+
 // capAgentSummaryOutput bounds the label request's output. The fork inherits
 // the agent's max_tokens (128000), and Gemini answered some of them with
 // 7-13k tokens (seen in the request log: 65-120 s for a handful of words).
 func capAgentSummaryOutput(out string, thinkingBudget int) string {
 	limit := int64(agentSummaryAnswerRoom)
-	if thinkingBudget > 0 {
+	switch {
+	case thinkingBudget > 0:
 		limit += int64(thinkingBudget)
+	case thinkingBudget < 0:
+		// Automatic thinking: its size is not known in advance, so leave room
+		// for a reasonable amount of it instead of cutting the label short.
+		limit = agentSummaryAutoThinkingRoom
 	}
 	if cur := gjson.Get(out, "generationConfig.maxOutputTokens").Int(); cur > limit {
 		out, _ = sjson.Set(out, "generationConfig.maxOutputTokens", limit)
