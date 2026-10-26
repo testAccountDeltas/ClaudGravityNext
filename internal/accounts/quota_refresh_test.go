@@ -91,3 +91,24 @@ func TestRefreshAllQuotasStaggered_AsksEveryAccountOneAfterAnother(t *testing.T)
 		t.Fatalf("the accounts must be asked one at a time, max in flight = %d", maxInFlight.Load())
 	}
 }
+
+// A paused account generates no traffic at all: not at start-up, not from the
+// dashboard's refresh button, not from the background refresh.
+func TestFetchQuota_SkipsADisabledAccount(t *testing.T) {
+	paused := catalogAccount("paused@example.com")
+	paused.Disabled = true
+	seedAccounts(t, paused, catalogAccount("active@example.com"))
+	n := quotaCounter(t)
+
+	if err := globalAccountManager.FetchQuota("paused@example.com"); err == nil {
+		t.Fatal("a disabled account must not be queried")
+	}
+	globalAccountManager.RefreshAllQuotas()
+	globalAccountManager.RefreshAllQuotasStaggered(time.Millisecond, 2*time.Millisecond)
+	globalAccountManager.TriggerAsyncQuotaRefresh("paused@example.com", 0)
+	time.Sleep(50 * time.Millisecond)
+	// RefreshAllQuotas and the staggered variant each ask the one active account once.
+	if got := n.Load(); got != 2 {
+		t.Fatalf("expected 2 quota calls (the active account twice), got %d", got)
+	}
+}

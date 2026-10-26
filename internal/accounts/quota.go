@@ -39,6 +39,17 @@ func (am *AccountManager) FetchQuota(email string) error {
 		return fmt.Errorf("account not found")
 	}
 
+	// A paused (disabled) account is left alone: no token refresh, no quota
+	// call. It used to be polled at start-up like the others, which kept
+	// sending Google traffic for an account whose owner had paused it (for
+	// instance while appealing a block).
+	am.mu.RLock()
+	disabled := acc.Disabled
+	am.mu.RUnlock()
+	if disabled {
+		return fmt.Errorf("account %s is disabled", email)
+	}
+
 	// acc.AccessToken/ExpiresAt/ProjectID are written elsewhere under
 	// am.mu.Lock() (e.g. RefreshAccessToken itself) — reading them here
 	// without holding am.mu.RLock() first raced with those writers
