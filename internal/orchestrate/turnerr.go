@@ -6,7 +6,6 @@ package orchestrate
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"claudgravity/internal/anthropicerr"
@@ -32,15 +31,17 @@ func isModelTurnFailure(err error) bool {
 // terminalSSEError picks the Anthropic error type/message for a request
 // that failed after the SSE response was already committed.
 func terminalSSEError(status int, err error) (string, string) {
+	// Whatever the upstream said stays in the log; the client gets a short
+	// message (a bare Google JSON/RPC error used to be sent as it was).
 	if te := asTurnError(err); te != nil {
-		return te.ErrType, te.Error()
+		return te.ErrType, anthropicerr.ClientMessage(te.Status, te.Error())
 	}
 	if status == 0 {
 		status = http.StatusBadGateway
 	}
 	msg := "upstream request failed"
 	if err != nil {
-		msg = fmt.Sprintf("Upstream failed after retries: %v", err)
+		msg = "Upstream failed after retries: " + anthropicerr.ClientMessage(status, err.Error())
 	}
 	return anthropicerr.TypeForStatus(status), msg
 }

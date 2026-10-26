@@ -121,3 +121,16 @@ func TestTerminalSSEError_Mapping(t *testing.T) {
 		t.Fatalf("wrapped turn error must still be recognised, got %q", got)
 	}
 }
+
+// An error after the response was committed must not carry raw Google detail.
+func TestTerminalSSEError_DoesNotLeakRawUpstreamDetail(t *testing.T) {
+	raw := errors.New(`HTTP 403 from https://cloudcode-pa.googleapis.com: {"error":{"code":403,"status":"PERMISSION_DENIED"}}`)
+	_, msg := terminalSSEError(403, raw)
+	if strings.Contains(msg, "googleapis") || strings.ContainsAny(msg, "{}") || msg == "" {
+		t.Fatalf("raw upstream detail reached the client: %q", msg)
+	}
+	te := &stream.UpstreamTurnError{ErrType: "api_error", Status: 500, Msg: `upstream stream error: {"error":{"message":"internal"}}`}
+	if _, msg := terminalSSEError(500, te); strings.ContainsAny(msg, "{}") {
+		t.Fatalf("a typed turn error leaked its JSON: %q", msg)
+	}
+}
