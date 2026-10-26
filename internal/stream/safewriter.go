@@ -188,6 +188,14 @@ func (s *SafeSSEWriter) IsReleased() bool {
 // package var only so tests can shrink it.
 var minPingGap = 4 * time.Second
 
+// SetMinPingGapForTest changes the ping throttle for tests in other packages
+// and returns the function that restores it.
+func SetMinPingGapForTest(d time.Duration) (restore func()) {
+	old := minPingGap
+	minPingGap = d
+	return func() { minPingGap = old }
+}
+
 // SendKeepalivePing writes a ping frame, throttled to at most once every
 // 4 seconds of real silence — matches v1's own SendKeepalivePing.
 func (s *SafeSSEWriter) SendKeepalivePing() error {

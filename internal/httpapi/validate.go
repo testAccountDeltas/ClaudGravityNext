@@ -16,6 +16,23 @@ import (
 	"claudgravity/internal/cacheusage"
 )
 
+// validatePrewarm applies the documented limits of a max_tokens: 0 request.
+func validatePrewarm(bodyBytes []byte) (string, bool) {
+	const lead = "\"max_tokens\": 0 (cache pre-warming) cannot be combined with "
+	switch {
+	case gjson.GetBytes(bodyBytes, "stream").Bool():
+		return lead + "\"stream\": true", false
+	case gjson.GetBytes(bodyBytes, "thinking.type").String() == "enabled":
+		return lead + "extended thinking (\"thinking.type\": \"enabled\")", false
+	case gjson.GetBytes(bodyBytes, "output_config.format").Exists() || gjson.GetBytes(bodyBytes, "output_format").Exists():
+		return lead + "structured outputs (\"output_config.format\")", false
+	}
+	if t := gjson.GetBytes(bodyBytes, "tool_choice.type").String(); t == "any" || t == "tool" {
+		return lead + "a forced \"tool_choice\" (\"" + t + "\")", false
+	}
+	return "", true
+}
+
 // validateMessagesRequest checks the hard-400 cases Anthropic's own spec
 // requires but which would otherwise sail through to Gemini and burn a
 // real upstream round-trip before failing: malformed JSON, missing/empty
@@ -34,8 +51,15 @@ func validateMessagesRequest(bodyBytes []byte) (errMsg string, ok bool) {
 	if gjson.GetBytes(bodyBytes, "model").String() == "" {
 		return "\"model\": required field is missing", false
 	}
-	if mt := gjson.GetBytes(bodyBytes, "max_tokens"); !mt.Exists() || mt.Type != gjson.Number || mt.Int() < 1 || float64(mt.Int()) != mt.Num {
-		return "\"max_tokens\": required field must be an integer >= 1", false
+	if mt := gjson.GetBytes(bodyBytes, "max_tokens"); !mt.Exists() || mt.Type != gjson.Number || mt.Int() < 0 || float64(mt.Int()) != mt.Num {
+		return "\"max_tokens\": required field must be an integer >= 0", false
+	} else if mt.Int() == 0 {
+		// max_tokens 0 is Anthropic's documented cache pre-warm: the prompt is
+		// read and cached, nothing is generated. Combinations that imply
+		// output are rejected, as the documentation says.
+		if msg, ok := validatePrewarm(bodyBytes); !ok {
+			return msg, false
+		}
 	}
 	if n := cacheusage.Analyze(bodyBytes).Count; n > cacheusage.MaxBreakpoints {
 		return fmt.Sprintf("A maximum of %d blocks with cache_control may be provided. Found %d.", cacheusage.MaxBreakpoints, n), false

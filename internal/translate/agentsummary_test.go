@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -29,6 +30,26 @@ func TestAgentSummaryFork_ToolCallsAreForbiddenButStayDeclared(t *testing.T) {
 	}
 	if len(gjson.Get(body, "tools.0.functionDeclarations").Array()) == 0 {
 		t.Fatalf("the declarations must stay (they keep the cached prefix valid): %s", body)
+	}
+}
+
+func TestAgentSummaryFork_OutputIsBounded(t *testing.T) {
+	prompt := `{"type":"text","text":"Describe your most recent action in 3-5 words using present tense (-ing). Do not use tools."}`
+	req := summaryReq(prompt)
+	req = strings.Replace(req, `"max_tokens":64`, `"max_tokens":128000`, 1)
+	res, err := ConvertClaudeRequestToGemini([]byte(req), config.TenantConfig{}, "auxiliary", "auxiliary", "s", "i", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := gjson.GetBytes(res.GeminiBody, "generationConfig.maxOutputTokens").Int()
+	if got <= 0 || got > agentSummaryAnswerRoom+int64(res.ThinkingBudget)+1 {
+		t.Fatalf("maxOutputTokens = %d (thinking budget %d)", got, res.ThinkingBudget)
+	}
+	// An ordinary request keeps its own allowance.
+	plain := strings.Replace(req, "Describe your most recent action in 3-5 words using present tense (-ing). Do not use tools.", "continue", 1)
+	res, _ = ConvertClaudeRequestToGemini([]byte(plain), config.TenantConfig{}, "main", "main", "s", "i", true)
+	if gjson.GetBytes(res.GeminiBody, "generationConfig.maxOutputTokens").Int() <= agentSummaryAnswerRoom+int64(res.ThinkingBudget) {
+		t.Fatalf("a normal request must not be capped: %s", gjson.GetBytes(res.GeminiBody, "generationConfig").Raw)
 	}
 }
 

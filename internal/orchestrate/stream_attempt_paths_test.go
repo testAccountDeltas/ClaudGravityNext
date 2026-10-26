@@ -12,6 +12,7 @@ import (
 
 	"claudgravity/internal/config"
 	"claudgravity/internal/reqctx"
+	"claudgravity/internal/stream"
 )
 
 // attemptEnv drives ONE runStreamingAttempt against a scripted transport, with
@@ -226,5 +227,36 @@ func TestAttempt_DirectKey_ClientLeavingAfterEarlyPingIs499(t *testing.T) {
 		}})
 	if !r.ok || r.status != 499 {
 		t.Fatalf("a client that hung up after the ping is 499, not a gateway timeout: ok=%v status=%d", r.ok, r.status)
+	}
+}
+
+// A failover-capable attempt (account pool) whose upstream stays silent for a
+// very long time pings the client so the connection survives, yet remains able
+// to fail over: the ping must not turn a later upstream error into a terminal
+// SSE error for this attempt.
+func TestAttempt_Pool_HungUpstreamGetsPingsAndStaysFailoverCapable(t *testing.T) {
+	origAfter, origEvery := failoverPingAfter, failoverPingEvery
+	failoverPingAfter, failoverPingEvery = 1500*time.Millisecond, 300*time.Millisecond
+	defer func() { failoverPingAfter, failoverPingEvery = origAfter, origEvery }()
+	defer stream.SetMinPingGapForTest(0)()
+
+	r := runAttempt(t, attemptEnv{antigravity: true, panicSec: 1, ttftSec: 10,
+		up: slowThen(2600*time.Millisecond, func() (*http.Response, error) { return respBody(200, goodSSE()), nil })})
+	if !r.ok || r.code != 200 {
+		t.Fatalf("ok=%v code=%d err=%v", r.ok, r.code, r.err)
+	}
+	if !strings.HasPrefix(r.body, "event: ping") || strings.Count(r.body, "event: ping") < 2 {
+		t.Fatalf("expected repeated pings while the upstream is silent:\n%.300s", r.body)
+	}
+	if !strings.Contains(r.body, "hello from a healthy turn") {
+		t.Fatalf("the answer must follow the pings:\n%s", r.body)
+	}
+
+	r = runAttempt(t, attemptEnv{antigravity: true, panicSec: 1, ttftSec: 10,
+		up: slowThen(2200*time.Millisecond, func() (*http.Response, error) {
+			return respBody(429, `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}`), nil
+		})})
+	if r.ok || r.status != http.StatusTooManyRequests {
+		t.Fatalf("an upstream rejection after a ping must still be a failover candidate: ok=%v status=%d", r.ok, r.status)
 	}
 }

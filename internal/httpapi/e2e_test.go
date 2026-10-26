@@ -138,7 +138,7 @@ func TestE2E_InvalidRequestsNeverReachUpstream(t *testing.T) {
 	}{
 		"no key":         {"", strings.Replace(e2eReq, "%s", "", 1), 401},
 		"wrong key":      {"sk-nope", strings.Replace(e2eReq, "%s", "", 1), 401},
-		"max_tokens 0":   {e2eKey, `{"model":"claude-sonnet-4-5","max_tokens":0,"messages":[{"role":"user","content":"hi"}]}`, 400},
+		"max_tokens -1":  {e2eKey, `{"model":"claude-sonnet-4-5","max_tokens":-1,"messages":[{"role":"user","content":"hi"}]}`, 400},
 		"empty messages": {e2eKey, `{"model":"claude-sonnet-4-5","max_tokens":5,"messages":[]}`, 400},
 		"bad edits":      {e2eKey, strings.Replace(e2eReq, "%s", `,"context_management":{"edits":[{"type":"clear_tool_uses_20250919"},{"type":"clear_thinking_20251015"}]}`, 1), 400},
 	}

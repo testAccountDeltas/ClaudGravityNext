@@ -334,6 +334,9 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 	// 7-8. Thinking & Output Tokens Configuration, sampling, structured
 	// outputs, safety settings.
 	out, budget = applyGenerationConfig(out, root, modelName, budget, isAntigravity)
+	if isAgentSummaryFork(root) {
+		out = capAgentSummaryOutput(out, budget)
+	}
 
 	estInputTokens := tokens.WeightedRequestTokensFor(req, prof)
 	// Reject (instead of silently truncating) a prompt that cannot fit. The

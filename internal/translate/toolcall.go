@@ -17,15 +17,11 @@ import (
 // Gemini this request.
 func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigravity bool, opt ...interface{}) []string {
 	var content gjson.Result
-	var sessionID string
+	// opt[1] is the session id; since the session-signature fallback was
+	// removed (see below) nothing here needs it, but callers still pass it.
 	if len(opt) > 0 {
 		if c, ok := opt[0].(gjson.Result); ok {
 			content = c
-		}
-	}
-	if len(opt) > 1 {
-		if s, ok := opt[1].(string); ok {
-			sessionID = s
 		}
 	}
 	name := p.Get("name").String()
@@ -48,8 +44,7 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 	// with (cached when first sent, by internal/stream) over the
 	// skip-validator bypass. If toolsig has no cached signature for callID,
 	// look for a sibling "thinking" block in this same assistant turn which
-	// carries the real signature echoed by Claude Code, or fall back to
-	// the session-level signature, avoiding conflicting signatures within the turn.
+	// carries the real signature echoed by Claude Code.
 	sig := toolsig.Get(callID)
 	if sig == "" && content.IsArray() {
 		content.ForEach(func(_, sibling gjson.Result) bool {
@@ -62,9 +57,14 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 			return true
 		})
 	}
-	if sig == "" && sessionID != "" {
-		sig = toolsig.GetSessionSignature(sessionID)
-	}
+	// No session-level fallback here on purpose. "The last signature this
+	// session produced" changes after EVERY response, so a past call whose
+	// own signature was not found (the gateway restarted, the 2 h cache
+	// expired, a call the gateway synthesized itself) was re-signed
+	// differently on every turn; its position is near the start of the
+	// conversation, so the whole prompt behind it stopped matching Gemini's
+	// implicit cache (cache_read stuck near the 13-20k of system+tools). The
+	// documented bypass value is deterministic and accepted by Gemini.
 	if sig == "" {
 		sig = "skip_thought_signature_validator"
 	}

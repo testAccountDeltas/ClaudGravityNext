@@ -321,6 +321,7 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 		applyPrefillToResponse(claudeResp, p.PrefillText)
 	}
 	stripOscIgnoreTag(claudeResp)
+	applyPrewarmShape(claudeResp, p.RawClaudeBody)
 
 	outJSON, _ := json.Marshal(claudeResp)
 	ratelimit.ApplyHeaders(w.Header(), st.ActiveAccount, st.ResolvedModelName)

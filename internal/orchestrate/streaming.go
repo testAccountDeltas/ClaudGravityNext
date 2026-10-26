@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -48,6 +47,7 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 		maxStreamDuration = defaultMaxStreamDuration
 	}
 
+	attemptStart := time.Now()
 	wd := startIdleWatchdog(baseCtx, p.RID, idleTimeout, chunkTimeout, maxStreamDuration)
 	defer wd.Stop()
 
@@ -168,6 +168,21 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 			// GAP-DEF-05: When failover is possible, do NOT send early HTTP 200
 			// headers before receiving at least one response or headers from Google.
 			// Committing headers early locks client and blocks failover.
+			// A silent upstream is not the same as a rejecting one: 429s and
+			// 5xx come back fast, so by now the request is hung. Keep the
+			// client's connection alive with pings (this is what lets the
+			// Claude Code client wait past its own first-byte window) while the
+			// attempt stays failover-capable: earlyHeadersSent remains false, so
+			// a later error still returns ok=false, and the next attempt reuses
+			// the already committed response (see trackCommit above).
+			// failoverPingAfter counts from the start of the attempt, and this
+			// branch is entered only once panicTimeout has passed.
+			untilPing := failoverPingAfter - time.Since(attemptStart)
+			if untilPing < time.Millisecond {
+				untilPing = time.Millisecond
+			}
+			hangPing := time.NewTimer(untilPing)
+			defer hangPing.Stop()
 		waitNoEarlyHeaders:
 			for {
 				select {
@@ -188,6 +203,12 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 
 				case <-panicTicker.C:
 					// Upstream is still working; wait without sending early headers.
+
+				case <-hangPing.C:
+					wMu.Lock()
+					_ = sw.SendKeepalivePing()
+					wMu.Unlock()
+					hangPing.Reset(failoverPingEvery)
 
 				case <-wd.ctx.Done():
 					status := http.StatusGatewayTimeout
@@ -343,31 +364,7 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 	reportedStatus := http.StatusOK
 	if err != nil {
 		errStr = err.Error()
-		switch {
-		case turnErr != nil:
-			// A bad turn that already had content on the wire (reported to
-			// the client as an SSE error event by the FSM).
-			reportedStatus = turnErr.Status
-		case clientGone(baseCtx):
-			reportedStatus = 499
-		case errors.Is(err, context.Canceled) || strings.Contains(errStr, "context canceled"):
-			// Idle watchdog cancelled its own derived ctx, not the client.
-			reportedStatus = http.StatusGatewayTimeout
-		case strings.Contains(errStr, "RESOURCE_EXHAUSTED") || strings.Contains(errStr, "rate_limit_error"):
-			reportedStatus = http.StatusTooManyRequests
-		case strings.Contains(errStr, "UNAVAILABLE") || strings.Contains(errStr, "overloaded_error"):
-			reportedStatus = http.StatusServiceUnavailable
-		case strings.Contains(errStr, "DEADLINE_EXCEEDED"):
-			// GAP-P0-04: a bare HTTP 500/api_error here reads as fatal to
-			// Claude Code's own retry logic — a real Anthropic SDK backs
-			// off and retries 504/overloaded_error automatically, and a
-			// Google-side timeout on a single upstream call is exactly
-			// the kind of transient condition that deserves a retry, not
-			// a dropped session.
-			reportedStatus = http.StatusGatewayTimeout
-		default:
-			reportedStatus = http.StatusInternalServerError
-		}
+		reportedStatus = reportedStreamStatus(baseCtx, err, turnErr)
 	}
 
 	requestlog.Add(requestlog.RequestLog{

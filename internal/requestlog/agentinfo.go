@@ -60,6 +60,14 @@ func ParseAgentInfo(r *http.Request) (agentKey, agentType, subagentName, instanc
 		}
 		return "subagent", "subagent", "subagent", promptID
 	}
+	// Only subagents carry an Agent-Id (see above), so one without the
+	// agent-type / request-class hint headers is still a subagent. Without
+	// this, a client that does not send those hints had every subagent
+	// request counted as the main thread: shared LoopGuard counters, one cwd
+	// key and one account for all of them, and no cheap tier for Explore.
+	if agentID != "" {
+		return "subagent", "subagent", "subagent", agentID
+	}
 	// The main/orchestrator thread's own requests used to fall back to
 	// Prompt-Id here too (same as a Task-tool-invocation subagent with no
 	// Agent-Id of its own) — but Prompt-Id is stable only for the span of

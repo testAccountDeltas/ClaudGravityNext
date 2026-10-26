@@ -65,6 +65,15 @@ func TestParseAgentInfo_SubagentPrefersAgentIDOverPromptID(t *testing.T) {
 	}
 }
 
+func TestParseAgentInfo_AgentIDAloneMakesItASubagent(t *testing.T) {
+	r, _ := http.NewRequest("POST", "/v1/messages", nil)
+	r.Header.Set("x-claude-code-agent-id", "instance-789")
+	agentKey, agentType, _, instanceID := ParseAgentInfo(r)
+	if agentKey != "subagent" || agentType != "subagent" || instanceID != "instance-789" {
+		t.Fatalf("key=%q type=%q instance=%q", agentKey, agentType, instanceID)
+	}
+}
+
 func TestParseAgentInfo_AuxiliaryShortCircuits(t *testing.T) {
 	r, _ := http.NewRequest("POST", "/v1/messages", nil)
 	r.Header.Set("x-claude-code-request-class", "auxiliary")

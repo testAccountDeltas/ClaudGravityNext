@@ -48,6 +48,24 @@ func isAgentSummaryFork(root gjson.Result) bool {
 	return found
 }
 
+// agentSummaryAnswerRoom is the output a three-to-five word label needs, on top
+// of whatever thinking the request is allowed.
+const agentSummaryAnswerRoom = 768
+
+// capAgentSummaryOutput bounds the label request's output. The fork inherits
+// the agent's max_tokens (128000), and Gemini answered some of them with
+// 7-13k tokens (seen in the request log: 65-120 s for a handful of words).
+func capAgentSummaryOutput(out string, thinkingBudget int) string {
+	limit := int64(agentSummaryAnswerRoom)
+	if thinkingBudget > 0 {
+		limit += int64(thinkingBudget)
+	}
+	if cur := gjson.Get(out, "generationConfig.maxOutputTokens").Int(); cur > limit {
+		out, _ = sjson.Set(out, "generationConfig.maxOutputTokens", limit)
+	}
+	return out
+}
+
 // forbidToolCalls switches function calling off in out while leaving the tool
 // declarations alone.
 func forbidToolCalls(out string) string {
