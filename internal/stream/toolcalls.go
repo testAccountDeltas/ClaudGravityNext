@@ -43,6 +43,12 @@ func normalizeToolCallArgsToObject(name, argsRaw string) string {
 // "reason" placeholder stripping) and streams the resulting tool_use
 // block.
 func (f *FSM) HandleFunctionCall(name string, argsRaw string, thoughtSignature string) error {
+	if f.suppressToolCalls {
+		// The request switched function calling off (tool_choice "none", a
+		// text-only label request), yet Gemini produced a call anyway.
+		logx.LogGateway("[Tools] tool calls are forbidden for this request: dropping %q", name)
+		return nil
+	}
 	if f.disableParallelToolUse && f.toolUseOccurred {
 		// Client asked for at most one tool call per turn — silently drop
 		// any call past the first rather than streaming a second tool_use

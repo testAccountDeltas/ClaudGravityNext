@@ -79,3 +79,25 @@ func TestIsAgentSummaryFork_Shapes(t *testing.T) {
 		}
 	}
 }
+
+func TestForcedToolChoice_IsAlsoSaidInWords(t *testing.T) {
+	base := `{"model":"claude-opus-4-5","max_tokens":64,` + summaryTools + `,"messages":[{"role":"user","content":"extract the data"}]`
+	sys := func(tc string) string {
+		res, err := ConvertClaudeRequestToGemini([]byte(base+tc+`}`), config.TenantConfig{}, "main", "main", "s", "i", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return gjson.GetBytes(res.GeminiBody, "system_instruction.parts.0.text").String()
+	}
+	if got := sys(`,"tool_choice":{"type":"any"}`); !strings.Contains(got, "calling one of the provided tools") {
+		t.Fatalf("any: %q", got)
+	}
+	if got := sys(`,"tool_choice":{"type":"tool","name":"Read"}`); !strings.Contains(got, "calling the tool Read") {
+		t.Fatalf("tool: %q", got)
+	}
+	for _, tc := range []string{``, `,"tool_choice":{"type":"auto"}`, `,"tool_choice":{"type":"none"}`} {
+		if got := sys(tc); strings.Contains(got, "must respond by calling") {
+			t.Fatalf("%q must not carry the forcing sentence: %q", tc, got)
+		}
+	}
+}

@@ -108,18 +108,18 @@ type FSM struct {
 	// (Gemini can interleave thought->text->thought) must not reopen one.
 	thinkingFinished bool
 
-	hasPriorTurns          bool
-	estInputTokens         int
-	preferRussian          bool
-	syntheticReasonTools   map[string]bool
-	cachePrefixFrac        float64
-	cacheFrac1h            float64
-	disableParallelToolUse bool
-	reverseToolNameMap     map[string]string
-	stopSequences          []string
-	textHoldBuffer         string
-	maxStopLen             int
-	stopMatched            string // the client stop_sequence the gateway itself found in the text (stopseq.go); "" = none
+	hasPriorTurns                             bool
+	estInputTokens                            int
+	preferRussian                             bool
+	syntheticReasonTools                      map[string]bool
+	cachePrefixFrac                           float64
+	cacheFrac1h                               float64
+	disableParallelToolUse, suppressToolCalls bool // the latter: mode NONE, drop any call Gemini emits anyway
+	reverseToolNameMap                        map[string]string
+	stopSequences                             []string
+	textHoldBuffer                            string
+	maxStopLen                                int
+	stopMatched                               string // the client stop_sequence the gateway itself found in the text (stopseq.go); "" = none
 
 	prefillText         string
 	prefillEmitted      bool
@@ -165,6 +165,7 @@ func NewFSM(writer *SafeSSEWriter, rid uint64, p *reqctx.Params, st *reqctx.Stat
 		cachePrefixFrac:        st.CachePrefixFrac,
 		cacheFrac1h:            st.CacheFrac1h,
 		disableParallelToolUse: p.DisableParallelToolUse,
+		suppressToolCalls:      p.SuppressToolCalls,
 		reverseToolNameMap:     p.ReverseToolNameMap,
 		hasPriorTurns:          p.HasPriorTurns,
 		stopSequences:          p.StopSequences,

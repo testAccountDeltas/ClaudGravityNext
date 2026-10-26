@@ -73,6 +73,7 @@ type Orchestrator struct{}
 // internal/stream.SafeSSEWriter.TerminateWithError already enforces one
 // layer down.
 func (o *Orchestrator) Execute(ctx context.Context, p *reqctx.Params, st *reqctx.State, w http.ResponseWriter) (ok bool, httpStatus int, retErr error) {
+	logPrefixChange(p.RID, p.ConvAnchor, st.GeminiBody)
 	tracked, tracker := trackCommit(w)
 	ok, httpStatus, retErr = o.execute(ctx, p, st, tracked)
 	if !ok && tracker.Committed() {

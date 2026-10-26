@@ -36,6 +36,8 @@ type execOpts struct {
 	panic int // PanicTimeoutSeconds (0 -> 5)
 	// direct runs the request as a plain API-key tenant (no Antigravity pool).
 	direct bool
+	// suppressTools mirrors Params.SuppressToolCalls (tool_choice "none").
+	suppressTools bool
 	// tenant tweaks the tenant before translation.
 	tenant func(*config.TenantConfig)
 }
@@ -119,7 +121,7 @@ func runExec(t *testing.T, o execOpts) execRes {
 	}
 	p := &reqctx.Params{RID: 960, SessionID: sess, ConvAnchor: "anc-" + t.Name(), Tenant: tenant,
 		ServerCfg: config.ServerConfig{PanicTimeoutSeconds: o.panic, TTFTTimeoutSeconds: o.ttft, ReadTimeoutSeconds: 5, MaxStreamDurationSeconds: 10},
-		ModelName: "claude-sonnet-4-5", IsStreaming: o.streaming, IsAntigravity: !o.direct, PrefillText: tr.PrefillText,
+		ModelName: "claude-sonnet-4-5", IsStreaming: o.streaming, IsAntigravity: !o.direct, PrefillText: tr.PrefillText, SuppressToolCalls: o.suppressTools,
 		SyntheticReasonTools: tr.SyntheticReasonTools, ReverseToolNameMap: tr.ReverseToolNameMap, RawClaudeBody: []byte(o.claude)}
 	st := &reqctx.State{StartedAt: time.Now(), ResolvedModelName: tr.ResolvedModel, GeminiBody: tr.GeminiBody, EstInputTokens: tr.EstimatedInputTokens}
 	rec := httptest.NewRecorder()

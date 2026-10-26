@@ -250,6 +250,7 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		IsAntigravity:        isAntigravity,
 		WasShrunk:            result.WasShrunk,
 		HasSafeguards:        hasSafeguards,
+		SuppressToolCalls:    gjson.GetBytes(result.GeminiBody, "toolConfig.functionCallingConfig.mode").String() == "NONE",
 		PrefillText:          result.PrefillText,
 		SyntheticReasonTools: result.SyntheticReasonTools,
 		ReverseToolNameMap:   result.ReverseToolNameMap,

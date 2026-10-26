@@ -112,6 +112,10 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 
 			case part.Get("functionCall").Exists():
 				fc := part.Get("functionCall")
+				if p.SuppressToolCalls {
+					logx.LogGateway("[Tools] tool calls are forbidden for this request: dropping %q", fc.Get("name").String())
+					continue
+				}
 				if len(cr.toolsCalled) > 0 && wantsSingleToolUse(claudeBodyBytes) {
 					logx.LogGateway("[Tools] disable_parallel_tool_use: dropping extra tool call %q (only the first call of a turn is kept)", fc.Get("name").String())
 					continue

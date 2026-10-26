@@ -51,6 +51,17 @@ func applySystemInstruction(out string, root gjson.Result, sessionKeys ...string
 	if root.Get("disable_parallel_tool_use").Bool() || root.Get("tool_choice.disable_parallel_tool_use").Bool() {
 		systemPrompt = strings.TrimSpace(systemPrompt + "\n\nYou must call at most ONE tool in this response. Do not perform parallel/simultaneous tool calls.")
 	}
+	// A forced tool_choice is not honoured by the upstream reliably (measured:
+	// about half of the neutral prompts got plain text back under mode ANY),
+	// so say it in words as well.
+	switch root.Get("tool_choice.type").String() {
+	case "any":
+		systemPrompt = strings.TrimSpace(systemPrompt + "\n\nYou must respond by calling one of the provided tools. A plain-text answer is not acceptable in this response.")
+	case "tool":
+		if n := root.Get("tool_choice.name").String(); n != "" {
+			systemPrompt = strings.TrimSpace(systemPrompt + "\n\nYou must respond by calling the tool " + n + ". A plain-text answer is not acceptable in this response.")
+		}
+	}
 	if systemPrompt != "" {
 		// Per Google's REST spec, system_instruction is just {"parts":
 		// [...]} — role is only meaningful on conversation turns in

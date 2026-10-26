@@ -52,6 +52,13 @@ type Params struct {
 	// enforcement site).
 	DisableParallelToolUse bool
 
+	// SuppressToolCalls: the request forbids tool calls (tool_choice "none",
+	// or a Claude Code label request that ends in "Do not use tools") and
+	// Gemini's function calling is switched off for it. Gemini still
+	// sometimes answers with a functionCall; those are dropped here instead
+	// of being sent to a client that said it wants none.
+	SuppressToolCalls bool
+
 	// MaxTokens is the client's max_tokens (0 = unknown / unlimited). It
 	// caps VISIBLE output only; see internal/stream/visiblecap.go.
 	MaxTokens int64
