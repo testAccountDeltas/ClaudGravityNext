@@ -291,7 +291,7 @@ func TestCov_OnboardUser(t *testing.T) {
 		"net":  func(*http.Request) (*http.Response, error) { return nil, errors.New("down") },
 	} {
 		withStubbedHTTPClient(t, roundTripperFunc(h))
-		if _, err := onboardAntigravityUser(context.Background(), "t", "legacy-tier"); err == nil {
+		if _, err := onboardAntigravityUser(context.Background(), "t", "legacy-tier", QuotaHosts[0]); err == nil {
 			t.Fatalf("%s: expected error", name)
 		}
 	}
@@ -300,10 +300,10 @@ func TestCov_OnboardUser(t *testing.T) {
 	withStubbedHTTPClient(t, roundTripperFunc(func(*http.Request) (*http.Response, error) { return covJSON(`{"done":false}`), nil }))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, err := onboardAntigravityUser(ctx, "t", "legacy-tier"); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := onboardAntigravityUser(ctx, "t", "legacy-tier", QuotaHosts[0]); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected deadline, got %v", err)
 	}
-	if _, err := onboardAntigravityUser(nil, "t", "x"); err == nil { //nolint:staticcheck
+	if _, err := onboardAntigravityUser(nil, "t", "x", QuotaHosts[0]); err == nil { //nolint:staticcheck
 		t.Fatal("nil ctx must error building request")
 	}
 }

@@ -107,7 +107,7 @@ func TestTerminalSSEError_Mapping(t *testing.T) {
 	if typ == "" || msg != "upstream request failed" {
 		t.Fatalf("zero status + nil err: %q %q", typ, msg)
 	}
-	for status, want := range map[int]string{429: "rate_limit_error", 503: "overloaded_error", 400: "invalid_request_error", 504: "overloaded_error"} {
+	for status, want := range map[int]string{429: "rate_limit_error", 503: "overloaded_error", 400: "invalid_request_error", 504: "timeout_error"} {
 		if got, m := terminalSSEError(status, errors.New("x")); got != want || !strings.Contains(m, "x") {
 			t.Errorf("status %d -> %q (%q), want %q", status, got, m, want)
 		}

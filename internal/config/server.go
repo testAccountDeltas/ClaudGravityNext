@@ -7,6 +7,7 @@ package config
 type ServerConfig struct {
 	Port                            int    `json:"port"`
 	PanicTimeoutSeconds             int    `json:"panic_timeout_seconds"`
+	TLSFingerprint                  string `json:"tls_fingerprint,omitempty"` // "go" (default: the standard Go ClientHello, matching the Antigravity client the User-Agent claims) or "chrome" (uTLS browser mimicry)
 	TTFTTimeoutSeconds              int    `json:"ttft_timeout_seconds"`
 	ReadTimeoutSeconds              int    `json:"read_timeout_seconds"`
 	TLSPort                         int    `json:"tls_port"`                                       // HTTPS listener for ANTHROPIC_BASE_URL (CA-signed, separate from the plain CONNECT-proxy port)

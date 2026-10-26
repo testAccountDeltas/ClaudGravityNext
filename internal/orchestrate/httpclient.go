@@ -14,5 +14,5 @@ import (
 // reached across package boundaries, same rationale as
 // internal/accounts' own copy.
 var httpClient = &http.Client{
-	Transport: tlsfingerprint.NewFingerprintedRoundTripper(),
+	Transport: tlsfingerprint.NewGoogleTransport(),
 }

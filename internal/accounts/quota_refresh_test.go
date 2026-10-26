@@ -66,3 +66,28 @@ func TestRefreshAllQuotas_FetchesEveryAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshAllQuotasStaggered_AsksEveryAccountOneAfterAnother(t *testing.T) {
+	seedAccounts(t, catalogAccount("st-a@example.com"), catalogAccount("st-b@example.com"), catalogAccount("st-c@example.com"))
+	var inFlight, maxInFlight, calls atomic.Int32
+	withStubbedHTTPClient(t, roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		n := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			m := maxInFlight.Load()
+			if n <= m || maxInFlight.CompareAndSwap(m, n) {
+				break
+			}
+		}
+		calls.Add(1)
+		time.Sleep(5 * time.Millisecond)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"groups":[]}`)), Header: http.Header{}}, nil
+	}))
+	globalAccountManager.RefreshAllQuotasStaggered(time.Millisecond, 3*time.Millisecond)
+	if calls.Load() < 3 {
+		t.Fatalf("every account must be asked: %d calls", calls.Load())
+	}
+	if maxInFlight.Load() != 1 {
+		t.Fatalf("the accounts must be asked one at a time, max in flight = %d", maxInFlight.Load())
+	}
+}

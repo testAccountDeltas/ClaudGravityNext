@@ -117,7 +117,7 @@ func handleUsage(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http.Re
 			acc = fresh
 		}
 	} else {
-		accounts.Manager().TriggerAsyncQuotaRefresh(acc.Email, 45*time.Second)
+		accounts.Manager().TriggerAsyncQuotaRefresh(acc.Email, 2*time.Minute)
 	}
 
 	var groupsOut []usageGroupOut

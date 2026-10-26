@@ -138,8 +138,11 @@ func TestCap_EmptyMaxTokens_RetriesOnceWithWiderAllowance(t *testing.T) {
 			if r.auths[0] != r.auths[1] {
 				t.Fatalf("the widening retry must stay on the same account")
 			}
-			if secondMax <= firstMax || firstMax == 0 {
-				t.Fatalf("maxOutputTokens must grow on the retry: first=%d second=%d", firstMax, secondMax)
+			// The Antigravity client sends no maxOutputTokens for Gemini models, so
+			// neither attempt carries one on the wire (the upstream default
+			// applies); the retry itself still happens.
+			if firstMax != 0 || secondMax != 0 {
+				t.Fatalf("maxOutputTokens must not be sent to the Antigravity upstream: first=%d second=%d", firstMax, secondMax)
 			}
 		})
 	}

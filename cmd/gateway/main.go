@@ -59,6 +59,7 @@ import (
 	"claudgravity/internal/mitm"
 	"claudgravity/internal/requestlog"
 	"claudgravity/internal/speccapture"
+	"claudgravity/internal/tlsfingerprint"
 )
 
 func main() {
@@ -106,6 +107,9 @@ func main() {
 		logx.LogGateway("[ClaudGravityNext] Warning: request log store init failed (dashboard sessions/logs will stay empty): %v", err)
 	}
 
+	tlsfingerprint.SetMode(serverCfg.TLSFingerprint)
+	logx.LogGateway("[ClaudGravityNext] Google-bound TLS ClientHello: %s", tlsfingerprint.Mode())
+
 	if err := accounts.InitAccountManager(*authDir, serverCfg); err != nil {
 		logx.LogGateway("[ClaudGravityNext] Notice: auths dir init: %v", err)
 	}
@@ -118,7 +122,7 @@ func main() {
 	// Kick off an initial background quota refresh for all accounts in the pool
 	// so the dashboard and the account selector immediately have real, fresh
 	// Google quota numbers and accurate cooldown states from startup.
-	go accounts.Manager().RefreshAllQuotas()
+	go accounts.Manager().RefreshAllQuotasStaggered(2*time.Second, 6*time.Second)
 
 	if _, err := accounts.Manager().FetchAvailableModels(false); err != nil {
 		logx.LogGateway("[ClaudGravityNext] Warning: initial model catalog fetch failed (retrying in the background): %v", err)

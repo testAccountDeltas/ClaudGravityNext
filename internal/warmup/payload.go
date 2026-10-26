@@ -4,6 +4,8 @@
 package warmup
 
 import (
+	"strings"
+
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
@@ -60,6 +62,19 @@ func WrapAntigravityPayload(modelName string, payload []byte, projectID string, 
 	template, _ = sjson.Set(template, "model", modelName)
 	template, _ = sjson.Set(template, "requestId", "agent-"+uuid.NewString())
 	template, _ = sjson.SetRaw(template, "request", requestRaw)
+	// The Antigravity client's protobuf-JSON is camelCase throughout; the
+	// gateway's internal Gemini body spells this one key in snake_case.
+	if si := gjson.Get(template, "request.system_instruction"); si.Exists() && !gjson.Get(template, "request.systemInstruction").Exists() {
+		raw := si.Raw
+		template, _ = sjson.Delete(template, "request.system_instruction")
+		template, _ = sjson.SetRaw(template, "request.systemInstruction", raw)
+	}
+	// The Antigravity client does not send maxOutputTokens for Gemini models
+	// (only Claude models carry one); the gateway enforces the client's
+	// max_tokens on the visible answer itself. Matches the reference relay.
+	if !strings.Contains(modelName, "claude") {
+		template, _ = sjson.Delete(template, "request.generationConfig.maxOutputTokens")
+	}
 
 	// Derive stable session ID for prefix cache
 	sessionID := sessionkey.GenerateStableSessionID(payload, generation, fallbackSessionKey)

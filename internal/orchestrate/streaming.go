@@ -56,13 +56,12 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 		return false, http.StatusInternalServerError, fmt.Errorf("failed to create upstream request: %w", err)
 	}
 	upReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set("Accept", "text/event-stream")
 	if st.BearerToken != "" {
 		upReq.Header.Set("Authorization", "Bearer "+st.BearerToken)
 	}
 	if p.IsAntigravity {
 		upReq.Header.Set("User-Agent", accounts.AntigravityUserAgent)
-		upReq.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
-		upReq.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 	}
 
 	type upResult struct {

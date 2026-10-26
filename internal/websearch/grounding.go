@@ -63,8 +63,6 @@ func searchWithGoogleGrounding(
 		httpReq.Header.Set("Authorization", "Bearer "+googleToken)
 		httpReq.Header.Set("Content-Type", "application/json; charset=utf-8")
 		httpReq.Header.Set("User-Agent", antigravityUserAgent)
-		httpReq.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
-		httpReq.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
 		resp, err := httpClient.Do(httpReq)
 		if err != nil {

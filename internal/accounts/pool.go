@@ -54,7 +54,7 @@ import (
 var httpClientPtr atomic.Pointer[http.Client]
 
 func init() {
-	httpClientPtr.Store(&http.Client{Transport: tlsfingerprint.NewFingerprintedRoundTripper()})
+	httpClientPtr.Store(&http.Client{Transport: tlsfingerprint.NewGoogleTransport()})
 }
 
 func httpClient() *http.Client { return httpClientPtr.Load() }

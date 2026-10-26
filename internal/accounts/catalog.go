@@ -105,25 +105,35 @@ func (am *AccountManager) FetchAvailableModels(forceRefresh bool) ([]AvailableMo
 		return nil, fmt.Errorf("no active Antigravity account available")
 	}
 
-	req, err := http.NewRequest("POST", CloudCodeModelsEndpoint, bytes.NewReader([]byte("{}")))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+accToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", AntigravityUserAgent)
-	req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
-	req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
+	// The Antigravity client talks to the daily/sandbox CloudCode hosts; the
+	// production host is only the last resort (same order as the quota calls).
+	var respBytes []byte
+	var fetchErr error
+	for _, host := range QuotaHosts {
+		req, err := http.NewRequest("POST", host+"/v1internal:fetchAvailableModels", bytes.NewReader([]byte("{}")))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+accToken)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", AntigravityUserAgent)
 
-	resp, err := httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("do fetchAvailableModels: %w", err)
+		resp, err := httpClient().Do(req)
+		if err != nil {
+			fetchErr = fmt.Errorf("do fetchAvailableModels: %w", err)
+			continue
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			fetchErr = fmt.Errorf("fetchAvailableModels HTTP %d: %s", resp.StatusCode, string(b))
+			continue
+		}
+		respBytes, fetchErr = b, nil
+		break
 	}
-	defer resp.Body.Close()
-
-	respBytes, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetchAvailableModels HTTP %d: %s", resp.StatusCode, string(respBytes))
+	if respBytes == nil {
+		return nil, fetchErr
 	}
 
 	root := gjson.ParseBytes(respBytes)

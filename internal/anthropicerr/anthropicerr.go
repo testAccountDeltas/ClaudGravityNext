@@ -14,8 +14,13 @@ func TypeForStatus(status int) string {
 	switch status {
 	case http.StatusTooManyRequests:
 		return "rate_limit_error"
-	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	case http.StatusGatewayTimeout:
+		// Documented as timeout_error (the request timed out while processing).
+		return "timeout_error"
+	case http.StatusBadGateway, http.StatusServiceUnavailable:
 		return "overloaded_error"
+	case http.StatusConflict:
+		return "conflict_error"
 	case http.StatusBadRequest:
 		return "invalid_request_error"
 	case http.StatusUnauthorized:

@@ -26,7 +26,7 @@ import (
 // reached across package boundaries, same rationale as
 // internal/accounts' and internal/orchestrate's own copies.
 var websearchHTTPClient = &http.Client{
-	Transport: tlsfingerprint.NewFingerprintedRoundTripper(),
+	Transport: tlsfingerprint.NewGoogleTransport(),
 }
 
 // tryDirectWebSearchIntercept handles v1's handleMessages section "2.1":

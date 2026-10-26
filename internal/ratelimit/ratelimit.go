@@ -33,6 +33,10 @@ import (
 // instead of surfacing a stale/past instant.
 const minResetAhead = 2 * time.Minute
 
+// quotaSnapshotMaxAge is how old an account's quota snapshot may get before the
+// next response triggers a background refresh.
+const quotaSnapshotMaxAge = 5 * time.Minute
+
 // IsNative3PModelExhausted reports whether acc's own 3P (Claude/GPT)
 // quota group is exhausted. Native 3P model names (claude-sonnet-4-6
 // etc.) pass straight through tiering's ResolveTieringAndEffort
@@ -225,9 +229,12 @@ func ApplyHeaders(header http.Header, acc *accounts.Record, modelName string) {
 			acc = fresh
 		}
 	}
-	// 5h quota depletes/resets ~34x faster than the weekly one, so a
-	// snapshot older than ~45s is already misleading.
-	accounts.Manager().TriggerAsyncQuotaRefresh(acc.Email, 45*time.Second)
+	// The 5h window is only a progress bar, so a snapshot a few minutes old is
+	// fine. This used to refresh at 45 s, i.e. a quota-summary call to Google
+	// roughly every 45 seconds for every account in use, all day: a polling
+	// rhythm no real client has (the Antigravity client asks when its quota
+	// panel is opened).
+	accounts.Manager().TriggerAsyncQuotaRefresh(acc.Email, quotaSnapshotMaxAge)
 
 	header.Set("anthropic-organization-id", fakeids.OrgID)
 	header.Set("anthropic-workspace-id", fakeids.WorkspaceID)

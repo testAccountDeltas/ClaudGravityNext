@@ -111,24 +111,35 @@ func persistAccountFields(filePath, projectID string, probed bool) {
 // loadCodeAssist reports none yet.
 func discoverAntigravityProjectID(ctx context.Context, accessToken string) (string, error) {
 	loadBody := []byte(`{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}`)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, CloudCodeLoadCodeAssistEndpoint, bytes.NewReader(loadBody))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", AntigravityUserAgent)
-	req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
-	req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
+	// Daily/sandbox hosts first, production last (see QuotaHosts).
+	var loadRespBytes []byte
+	var loadErr error
+	loadHost := ""
+	for _, host := range QuotaHosts {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, host+"/v1internal:loadCodeAssist", bytes.NewReader(loadBody))
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", AntigravityUserAgent)
 
-	resp, err := httpClient().Do(req)
-	if err != nil {
-		return "", fmt.Errorf("loadCodeAssist: %w", err)
+		resp, err := httpClient().Do(req)
+		if err != nil {
+			loadErr = fmt.Errorf("loadCodeAssist: %w", err)
+			continue
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			loadErr = fmt.Errorf("loadCodeAssist HTTP %d: %s", resp.StatusCode, string(b))
+			continue
+		}
+		loadRespBytes, loadErr, loadHost = b, nil, host
+		break
 	}
-	loadRespBytes, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("loadCodeAssist HTTP %d: %s", resp.StatusCode, string(loadRespBytes))
+	if loadRespBytes == nil {
+		return "", loadErr
 	}
 
 	loadResp := gjson.ParseBytes(loadRespBytes)
@@ -148,12 +159,12 @@ func discoverAntigravityProjectID(ctx context.Context, accessToken string) (stri
 		return true
 	})
 
-	return onboardAntigravityUser(ctx, accessToken, defaultTierID)
+	return onboardAntigravityUser(ctx, accessToken, defaultTierID, loadHost)
 }
 
 // onboardAntigravityUser polls onboardUser until Google reports the
 // onboarding operation done, then extracts the newly-provisioned project id.
-func onboardAntigravityUser(ctx context.Context, accessToken, tierID string) (string, error) {
+func onboardAntigravityUser(ctx context.Context, accessToken, tierID, host string) (string, error) {
 	reqBody, _ := sjson.SetBytes(
 		[]byte(`{"metadata":{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}`),
 		"tierId", tierID,
@@ -161,15 +172,13 @@ func onboardAntigravityUser(ctx context.Context, accessToken, tierID string) (st
 
 	const maxAttempts = 5
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, CloudCodeOnboardUserEndpoint, bytes.NewReader(reqBody))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, host+"/v1internal:onboardUser", bytes.NewReader(reqBody))
 		if err != nil {
 			return "", err
 		}
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", AntigravityUserAgent)
-		req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
-		req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
 		resp, err := httpClient().Do(req)
 		if err != nil {

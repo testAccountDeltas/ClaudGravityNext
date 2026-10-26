@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -89,8 +91,6 @@ hostLoop:
 			req.Header.Set("Authorization", "Bearer "+accToken)
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("User-Agent", AntigravityUserAgent)
-			req.Header.Set("X-Goog-Api-Client", "google-cloud-sdk vscode_cloudshelleditor/0.1")
-			req.Header.Set("Client-Metadata", `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`)
 
 			resp, err := httpClient().Do(req)
 			if err != nil {
@@ -244,6 +244,26 @@ func (am *AccountManager) TriggerAsyncQuotaRefresh(email string, maxAge time.Dur
 		defer quotaRefreshInFlight.Delete(email)
 		_ = am.FetchQuota(email)
 	}()
+}
+
+// RefreshAllQuotasStaggered refreshes the accounts one at a time with a random
+// pause between them. A process start used to ask Google for every account's
+// quota at the same instant (and the gateway was restarted often); a real
+// client does not do that.
+func (am *AccountManager) RefreshAllQuotasStaggered(minGap, maxGap time.Duration) {
+	am.mu.RLock()
+	var emails []string
+	for e := range am.accounts {
+		emails = append(emails, e)
+	}
+	am.mu.RUnlock()
+	sort.Strings(emails)
+	for i, e := range emails {
+		if i > 0 {
+			time.Sleep(minGap + time.Duration(rand.Int63n(int64(maxGap-minGap)+1)))
+		}
+		_ = am.FetchQuota(e)
+	}
 }
 
 // RefreshAllQuotas refreshes every account's quota concurrently. FetchQuota
