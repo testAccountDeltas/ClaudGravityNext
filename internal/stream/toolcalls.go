@@ -47,6 +47,7 @@ func (f *FSM) HandleFunctionCall(name string, argsRaw string, thoughtSignature s
 		// The request switched function calling off (tool_choice "none", a
 		// text-only label request), yet Gemini produced a call anyway.
 		logx.LogGateway("[Tools] tool calls are forbidden for this request: dropping %q", name)
+		f.droppedToolCalls++
 		return nil
 	}
 	if f.disableParallelToolUse && f.toolUseOccurred {

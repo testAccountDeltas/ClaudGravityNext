@@ -108,13 +108,13 @@ type FSM struct {
 	// (Gemini can interleave thought->text->thought) must not reopen one.
 	thinkingFinished bool
 
-	hasPriorTurns                             bool
+	hasPriorTurns, preferRussian              bool
 	estInputTokens                            int
-	preferRussian                             bool
 	syntheticReasonTools                      map[string]bool
 	cachePrefixFrac                           float64
 	cacheFrac1h                               float64
 	disableParallelToolUse, suppressToolCalls bool // the latter: mode NONE, drop any call Gemini emits anyway
+	droppedToolCalls                          int  // how many calls that rule dropped
 	reverseToolNameMap                        map[string]string
 	stopSequences                             []string
 	textHoldBuffer                            string

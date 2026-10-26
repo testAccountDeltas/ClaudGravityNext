@@ -52,7 +52,7 @@ func (f *FSM) FinishStream(finishReason string) error {
 			Msg: "upstream hit the output token limit while thinking, before any visible output"})
 	}
 	if !prefillOnly {
-		if terr := cls.CheckTurn(finishReason, hasText, f.toolUseOccurred); terr != nil {
+		if terr := cls.CheckTurn(finishReason, hasText, f.toolUseOccurred || f.droppedToolCalls > 0); terr != nil {
 			f.finalStopReason = "error"
 			return f.failTurn(terr)
 		}

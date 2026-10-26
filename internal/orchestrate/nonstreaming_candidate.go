@@ -34,6 +34,7 @@ type candidateResult struct {
 	toolsCalled        []string
 	toolCallIDs        []string
 	toolCallSignatures []string
+	droppedCalls       int // calls Gemini made although the request forbids them
 	textChars          int
 	thinkingChars      int
 	lastText           string
@@ -114,6 +115,7 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 				fc := part.Get("functionCall")
 				if p.SuppressToolCalls {
 					logx.LogGateway("[Tools] tool calls are forbidden for this request: dropping %q", fc.Get("name").String())
+					cr.droppedCalls++
 					continue
 				}
 				if len(cr.toolsCalled) > 0 && wantsSingleToolUse(claudeBodyBytes) {

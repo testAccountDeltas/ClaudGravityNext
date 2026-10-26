@@ -242,7 +242,10 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 		logFailure(terr.Status, terr.Error())
 		return false, terr.Status, terr
 	}
-	if terr := finishClass.CheckTurn(finishReason, textChars > 0, hasToolUse); terr != nil && !prefillOnly {
+	// A turn whose only product was a call the request forbids is finished, not
+	// "empty": retrying it would just repeat the same call (three upstream
+	// round-trips for a label), so the client gets an empty end_turn.
+	if terr := finishClass.CheckTurn(finishReason, textChars > 0, hasToolUse || cr.droppedCalls > 0); terr != nil && !prefillOnly {
 		logx.LogGateway("[#%d] << non-streaming turn failed (retryable): finishReason=%q err=%v usage in=%d out=%d", p.RID, finishReason, terr, inTok, outTok)
 		logFailure(terr.Status, terr.Error())
 		return false, terr.Status, terr

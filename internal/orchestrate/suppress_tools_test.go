@@ -32,3 +32,18 @@ func TestNonStreaming_ForbiddenToolCallIsDropped(t *testing.T) {
 		t.Fatalf("an ordinary request keeps its call: %s", body)
 	}
 }
+
+// A turn that consisted only of a forbidden call is finished with empty content;
+// retrying it would repeat the same call on every attempt.
+func TestNonStreaming_OnlyAForbiddenCallEndsAsAnEmptyTurnWithoutRetries(t *testing.T) {
+	claude := `{"model":"claude-sonnet-4-5","max_tokens":1024,"tools":[{"name":"Read","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}}}}],"messages":[{"role":"user","content":"go on"}]}`
+	cand := tfWrap(`{"content":{"role":"model","parts":[{"functionCall":{"name":"Read","args":{"file_path":"/a.go"}}}]},"finishReason":"STOP"}`)
+	r := runExec(t, execOpts{nAcc: 1, claude: claude, suppressTools: true,
+		up: func(int, *http.Request, string) (*http.Response, error) { return respBody(200, cand), nil }})
+	if !r.ok || r.attempts != 1 {
+		t.Fatalf("ok=%v status=%d attempts=%d err=%v", r.ok, r.status, r.attempts, r.err)
+	}
+	if gjson.Get(r.body, "stop_reason").String() != "end_turn" || len(gjson.Get(r.body, "content").Array()) != 0 {
+		t.Fatalf("expected an empty end_turn: %s", r.body)
+	}
+}
