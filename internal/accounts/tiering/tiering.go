@@ -71,9 +71,11 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 	// 1. Explicit native models preservation, then family mapping by
 	// substring (so "us.anthropic.claude-opus-4-5-20250929-v1:0", "OPUS",
 	// "claude-sonnet-4-5[1m]" all behave like their bare alias).
-	if model == "claude-sonnet-4-6" || model == "claude-opus-4-6-thinking" || model == "gpt-oss-120b-medium" {
+	if IsNativeModel(model) {
 		// Native 3P models supported by CloudCode - keep if explicitly requested
-	} else if fam := ModelFamily(model); fam != "" {
+	} else if fam := ModelFamily(model); fam != "" && familyOverride(fam) != "" {
+		model = familyOverride(fam) // operator mapped this family to a native model
+	} else if fam != "" {
 		switch fam {
 		case "sonnet":
 			model = "gemini-3.8-flash-medium"

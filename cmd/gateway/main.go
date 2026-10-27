@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"claudgravity/internal/accounts"
+	"claudgravity/internal/accounts/tiering"
 	"claudgravity/internal/clistubs"
 	"claudgravity/internal/config"
 	"claudgravity/internal/dashboard"
@@ -109,6 +110,10 @@ func main() {
 
 	tlsfingerprint.SetMode(serverCfg.TLSFingerprint)
 	logx.LogGateway("[ClaudGravityNext] Google-bound TLS ClientHello: %s", tlsfingerprint.Mode())
+	if len(serverCfg.ModelOverrides) > 0 {
+		skipped := tiering.SetFamilyOverrides(serverCfg.ModelOverrides)
+		logx.LogGateway("[ClaudGravityNext] Model overrides: %v (ignored: %v)", serverCfg.ModelOverrides, skipped)
+	}
 
 	if err := accounts.InitAccountManager(*authDir, serverCfg); err != nil {
 		logx.LogGateway("[ClaudGravityNext] Notice: auths dir init: %v", err)
