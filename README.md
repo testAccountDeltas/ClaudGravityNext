@@ -67,8 +67,34 @@ Open <http://localhost:8898/> (user `admin`, password = `dashboard_password` fro
 
 **5. Use it from Claude Code**
 
-The simplest way is the client installer below; it writes this environment for you. To do it
-by hand on the same machine as the gateway (bash; on Windows use `set "NAME=value"` in a `.cmd`):
+The easiest way is the [client installer](#one-line-client-setup-optional) below: it writes
+this whole environment into a launcher for you. To set it up by hand, define **all** of these
+in the shell that starts `claude` (every one is required; this is exactly what the installer
+writes):
+
+| Variable | Value | Why |
+|---|---|---|
+| `CLAUDE_CONFIG_DIR` | a new empty folder, e.g. `~/.claudgravitynext/profile` | Separate profile, so the session shares no login or history with a real Claude account. |
+| `ANTHROPIC_BASE_URL` | `http://localhost:8898` | Where the gateway listens (see "another machine" below for remote). |
+| `CLAUDE_CODE_OAUTH_TOKEN` | your tenant key (`sk-...` from `config.json`) | Used instead of `ANTHROPIC_AUTH_TOKEN`, so Claude Code runs in its signed-in mode. |
+| `CLAUDE_CODE_OAUTH_SCOPES` | `user:inference user:profile` | Describes the (fake) signed-in account. |
+| `CLAUDE_CODE_SUBSCRIPTION_TYPE` | `max` | Same: enables the normal feature set. |
+| `CLAUDE_CODE_RATE_LIMIT_TIER` | `default` | Same. |
+| `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` | `1` | Treat the custom URL as the official API: the client calls the profile/usage endpoints the gateway answers (usage bars, startup checks) and keeps the prompt cache warm. |
+| `CLAUDE_CODE_GATEWAY_HINT_HEADERS` | `1` | Claude Code labels each request (main / subagent / helper). Without it every helper call (titles, summaries) is treated as heavy and can stall for 20-60 s. |
+| `CLAUDE_CODE_ATTRIBUTION_HEADER` | `0` | Drops the per-request attribution block, which would change the prompt prefix and break caching. |
+| `CLAUDE_CODE_ENABLE_TODO_TOOLS` | `1` | Keeps the todo tools available. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | `xhigh` | Default effort (`low` ... `max`), mapped to a thinking budget. |
+| `DISABLE_AUTOUPDATER` | `1` | The client must not replace itself with a build you did not test. |
+| `CLAUDE_CODE_USE_POWERSHELL_TOOL` | `1` (Windows with PowerShell only) | Shell tool selection on Windows. |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_SIMPLE` | **empty / unset** | A leftover value would bypass the gateway, override the token, or switch the client into its reduced "simple" mode. |
+
+Leaving any of them out (or keeping a stale proxy, key or stored login) is the usual reason
+the client bypasses the gateway, loses the fast tier for helper requests, or breaks the prompt
+cache.
+
+<details>
+<summary>Copy-paste launcher: macOS / Linux (bash)</summary>
 
 ```
 export CLAUDE_CONFIG_DIR="$HOME/.claudgravitynext/profile"
@@ -87,24 +113,10 @@ unset HTTP_PROXY HTTPS_PROXY ALL_PROXY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CL
 claude
 ```
 
-All of the following are required. What each one is for:
+</details>
 
-| Variable | Why it is there |
-|---|---|
-| `CLAUDE_CONFIG_DIR` | Separate profile, so the gateway session does not share login or history with a real Claude account on the same machine. |
-| `ANTHROPIC_BASE_URL` | Where the gateway listens. Over the network use `https://<host>:<tls_port>` (see below). |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Your tenant key from `config.json`. Used instead of `ANTHROPIC_AUTH_TOKEN` so Claude Code runs in its signed-in mode. |
-| `CLAUDE_CODE_OAUTH_SCOPES`, `_SUBSCRIPTION_TYPE`, `_RATE_LIMIT_TIER` | Describe the (fake) signed-in account so Claude Code enables its normal feature set. |
-| `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1` | Treat the custom URL as the official API: the client then calls the profile/usage endpoints the gateway answers (usage bars, startup checks) and keeps the prompt cache warm. |
-| `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` | Claude Code labels each request (main / subagent / helper). Without it every helper call (titles, summaries) is treated as a heavy request and can stall for 20-60 s. |
-| `CLAUDE_CODE_ATTRIBUTION_HEADER=0` | Drops the per-request attribution block, which would otherwise change the prompt prefix and break caching. |
-| `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` | Keeps the todo tools available. |
-| `CLAUDE_CODE_EFFORT_LEVEL` | Default effort (`low` ... `max`), mapped to a thinking budget. |
-| `DISABLE_AUTOUPDATER=1` | The client must not replace itself with a build you did not test. |
-| unset proxies / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `CLAUDE_CODE_SIMPLE` | A leftover value would bypass the gateway, override the token above, or switch the client into its reduced "simple" mode (set empty on purpose in the installer's launcher). |
-
-On Windows with PowerShell as the shell tool, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`.
-The same thing as a Windows `.cmd` launcher (an empty `set "X="` clears a variable):
+<details>
+<summary>Copy-paste launcher: Windows (.cmd)</summary>
 
 ```
 @echo off
@@ -132,33 +144,35 @@ claude %*
 endlocal
 ```
 
+</details>
+
 **Sign out of the standard Claude login first.** Claude Code keeps its own claude.ai login
 (or API key) in its config folder, and a stored login can take precedence over
-`CLAUDE_CODE_OAUTH_TOKEN` or replace it after a transient 401 — the session then talks to
+`CLAUDE_CODE_OAUTH_TOKEN` or replace it after a transient 401 - the session then talks to
 Anthropic instead of the gateway, or fails with login errors. Make sure the profile you launch
 with has no stored login:
 
-- The installer and the block above use their own `CLAUDE_CONFIG_DIR`, a fresh profile with no
-  login. This is the recommended way and needs nothing else.
+- The installer and the launchers above use their own `CLAUDE_CONFIG_DIR`, a fresh profile
+  with no login. This is the recommended way and needs nothing else.
 - If you point Claude Code at a profile that was ever signed in (the default `~/.claude`, the
   VS Code extension), run `/logout` inside Claude Code in that profile first. Also remove
   `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and any `apiKeyHelper` from its settings.
 - If the client says "Please run /login" or shows your real Claude account in `/status`, a
   stored login is still being picked up: check `CLAUDE_CONFIG_DIR` is set in that terminal.
 
-If the gateway is on **another machine**, Claude Code also has to reach its official-looking
-hostnames through the gateway and trust its certificate. Add:
+**Gateway on another machine.** Claude Code must also reach the gateway's official-looking
+hostnames through it and trust its certificate. Change `ANTHROPIC_BASE_URL` and add three more:
 
-```
-export ANTHROPIC_BASE_URL="https://<gateway-host>:<tls_port>"          # tls_port = port + 2
-export HTTPS_PROXY="http://<proxy_secret>:x@<gateway-host>:<connect_port>"   # connect_port = port + 1
-export SSL_CERT_FILE="/path/to/ca.pem"
-export NODE_EXTRA_CA_CERTS="/path/to/ca.pem"
-```
+| Variable | Value |
+|---|---|
+| `ANTHROPIC_BASE_URL` | `https://<gateway-host>:<tls_port>` (`tls_port` = port + 2) |
+| `HTTPS_PROXY` | `http://<proxy_secret>:x@<gateway-host>:<connect_port>` (`connect_port` = port + 1) |
+| `SSL_CERT_FILE` | path to the gateway's CA certificate |
+| `NODE_EXTRA_CA_CERTS` | the same path |
 
 `proxy_secret` is in the gateway's `config.json`; the CA certificate is `ca/superrelay-ca.pem`
-on the gateway (the file is public, the matching `.key` never leaves that machine). The client
-installer below fetches all of this from `http://<host>:<port>/api/bootstrap?key=<your key>`,
+on the gateway (the certificate is public, the matching `.key` never leaves that machine). The
+client installer fetches all of this from `http://<host>:<port>/api/bootstrap?key=<your key>`,
 so you only need the address and the key.
 
 Quick check that the gateway is alive:
@@ -166,11 +180,6 @@ Quick check that the gateway is alive:
 ```
 curl -H "x-api-key: sk-your-key-from-config" http://localhost:8898/v1/models
 ```
-
-> **All of these parameters are required.** This is the exact environment the installer
-> writes; leaving any of them out (or keeping a stale proxy, key or stored login) is the usual
-> reason the client bypasses the gateway, loses the helper-request tier, or breaks the prompt
-> cache. Copy the whole block.
 
 ### One-line client setup (optional)
 
