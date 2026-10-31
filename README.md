@@ -105,6 +105,20 @@ What each one is for:
 
 On Windows with PowerShell as the shell tool, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`.
 
+**Sign out of the standard Claude login first.** Claude Code keeps its own claude.ai login
+(or API key) in its config folder, and a stored login can take precedence over
+`CLAUDE_CODE_OAUTH_TOKEN` or replace it after a transient 401 — the session then talks to
+Anthropic instead of the gateway, or fails with login errors. Make sure the profile you launch
+with has no stored login:
+
+- The installer and the block above use their own `CLAUDE_CONFIG_DIR`, a fresh profile with no
+  login. This is the recommended way and needs nothing else.
+- If you point Claude Code at a profile that was ever signed in (the default `~/.claude`, the
+  VS Code extension), run `/logout` inside Claude Code in that profile first. Also remove
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and any `apiKeyHelper` from its settings.
+- If the client says "Please run /login" or shows your real Claude account in `/status`, a
+  stored login is still being picked up: check `CLAUDE_CONFIG_DIR` is set in that terminal.
+
 If the gateway is on **another machine**, Claude Code also has to reach its official-looking
 hostnames through the gateway and trust its certificate. Add:
 
