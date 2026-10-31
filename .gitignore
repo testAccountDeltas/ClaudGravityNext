@@ -48,3 +48,9 @@ testdata/raw_chunks/
 
 # coverage profile written by scripts/coverage_gate.sh
 cover.out
+
+# Личные скрипты запуска/доступа — не публиковать
+launch_v2.cmd
+launch_v2_server.cmd
+show_passwords.cmd
+start_v2.bat
