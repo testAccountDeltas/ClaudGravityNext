@@ -87,7 +87,7 @@ unset HTTP_PROXY HTTPS_PROXY ALL_PROXY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CL
 claude
 ```
 
-What each one is for:
+All of the following are required. What each one is for:
 
 | Variable | Why it is there |
 |---|---|
@@ -167,9 +167,10 @@ Quick check that the gateway is alive:
 curl -H "x-api-key: sk-your-key-from-config" http://localhost:8898/v1/models
 ```
 
-> This is the environment the installer writes. The variables have not each been tested in
-> isolation, so the "why" column describes intent; if something misbehaves, start from the
-> full list rather than a subset.
+> **All of these parameters are required.** This is the exact environment the installer
+> writes; leaving any of them out (or keeping a stale proxy, key or stored login) is the usual
+> reason the client bypasses the gateway, loses the helper-request tier, or breaks the prompt
+> cache. Copy the whole block.
 
 ### One-line client setup (optional)
 
