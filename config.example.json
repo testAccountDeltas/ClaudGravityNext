@@ -1,0 +1,22 @@
+{
+  "server": {
+    "port": 8901,
+    "public_host": "localhost",
+    "dashboard_password": "",
+    "proxy_secret": "",
+    "google_oauth_client_id": "",
+    "google_oauth_client_secret": "",
+    "spec_capture_enabled": false
+  },
+  "tenants": {
+    "sk-change-me": {
+      "name": "My key",
+      "google_auth_type": "oauth_pool",
+      "google_base_url": "https://daily-cloudcode-pa.sandbox.googleapis.com",
+      "default_model": "gemini-2.5-flash",
+      "thinking_budget": -1,
+      "strip_search_tools": true,
+      "strategy": "sticky"
+    }
+  }
+}

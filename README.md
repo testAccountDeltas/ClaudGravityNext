@@ -26,15 +26,43 @@ go test ./...
 
 Conventions: Go files stay under 400 lines, `gofmt` clean, every fix ships with a test.
 
-## Run
+## Quick start
 
-```
-gateway_v2 -config config.json -auths auths -ca-dir ca -connect-port <port>
-```
+1. Build: `go build -o gateway_v2 ./cmd/gateway` (add `.exe` on Windows).
+2. Create your config from the template and edit it:
+   ```
+   cp config.example.json config.json
+   ```
+   - Replace the `sk-change-me` key (the object key under `tenants`) with your own random
+     string, e.g. `sk-` followed by 32 hex characters. This is the API key your clients send.
+   - Leave `dashboard_password` and `proxy_secret` empty: they are generated and written back
+     to `config.json` on first start.
+   - `google_oauth_client_id` / `google_oauth_client_secret` are optional overrides for the
+     OAuth client used to log accounts in; leave empty to use the built-in defaults.
+3. Start it:
+   ```
+   ./gateway_v2 -config config.json -auths auths -ca-dir ca
+   ```
+   `-connect-port` sets the CONNECT-proxy port (default `server.port + 1`).
+4. Open `http://localhost:8901/` (user `admin`, password = `dashboard_password` from
+   `config.json`) and add your Google account(s) through the OAuth login. Credentials are
+   stored under `auths/`.
+5. Point Claude Code at the gateway:
+   ```
+   ANTHROPIC_BASE_URL=http://localhost:8901
+   ANTHROPIC_AUTH_TOKEN=<the tenant key from config.json>
+   CLAUDE_CODE_GATEWAY_HINT_HEADERS=1
+   ```
+   `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` makes Claude Code send the request-class headers the
+   gateway uses to route small helper requests (titles, summaries) to a cheap tier.
 
-Configuration lives in `config.json` (`server` section: ports, timeouts,
-`tls_fingerprint`, `model_overrides`, ...). Secrets are generated per instance on first run
-and are never committed.
+`config.json`, `auths/`, `ca/` (the gateway's own MITM CA key), logs and request captures are
+git-ignored; never commit them. Running on a remote host: set `server.public_host` to its
+address so the generated TLS certificate matches, and put the gateway behind your own firewall
+or reverse proxy.
+
+Other `server` options: ports and timeouts, `tls_fingerprint` (`go` or `chrome`),
+`model_overrides`, `allow_history_truncation`, `max_stream_duration_seconds`.
 
 ## Documentation
 
