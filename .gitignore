@@ -13,6 +13,7 @@ ca/
 # be tracked.
 profile/
 profile-server/
+profile-*/
 
 # ===== Собранные бинарники =====
 /gateway
