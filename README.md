@@ -83,6 +83,28 @@ Quick check that it's alive:
 curl -H "x-api-key: sk-your-key-from-config" http://localhost:8898/v1/models
 ```
 
+### One-line client setup (optional)
+
+If the gateway runs on another machine, a helper script configures Claude Code on yours: it
+fetches the gateway's CA certificate and settings, writes a launcher, and adds a
+"ClaudGravityNext: Open Claude Code here" entry to the folder context menu (Windows) or a
+`claudgravity` shell command (macOS/Linux). You only need the gateway address and your API key.
+
+```
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.ps1 | iex
+
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.sh | bash
+```
+
+Set `CLAUDGRAVITY_URL` and `CLAUDGRAVITY_KEY` beforehand to skip the prompts. Read the script
+before piping it into a shell; uninstall with `bash install.sh --uninstall` or
+`.\install.ps1 -Uninstall`.
+
+`start.bat` / `start.sh` start the gateway from its own folder (they stop a previous instance
+on Windows and check that `config.json` exists).
+
 ## Configuration
 
 Everything lives in `config.json` (see `config.example.json`).
