@@ -83,7 +83,7 @@ export CLAUDE_CODE_ATTRIBUTION_HEADER=0
 export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
 export CLAUDE_CODE_EFFORT_LEVEL=xhigh
 export DISABLE_AUTOUPDATER=1
-unset HTTP_PROXY HTTPS_PROXY ALL_PROXY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_SIMPLE
 claude
 ```
 
@@ -101,9 +101,36 @@ What each one is for:
 | `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` | Keeps the todo tools available. |
 | `CLAUDE_CODE_EFFORT_LEVEL` | Default effort (`low` ... `max`), mapped to a thinking budget. |
 | `DISABLE_AUTOUPDATER=1` | The client must not replace itself with a build you did not test. |
-| unset proxies / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` | A leftover value would bypass the gateway or override the token above. |
+| unset proxies / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `CLAUDE_CODE_SIMPLE` | A leftover value would bypass the gateway, override the token above, or switch the client into its reduced "simple" mode (set empty on purpose in the installer's launcher). |
 
 On Windows with PowerShell as the shell tool, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`.
+The same thing as a Windows `.cmd` launcher (an empty `set "X="` clears a variable):
+
+```
+@echo off
+setlocal
+set "CLAUDE_CONFIG_DIR=%LOCALAPPDATA%\ClaudGravityNext\profile"
+set "ANTHROPIC_BASE_URL=http://localhost:8898"
+set "HTTP_PROXY="
+set "HTTPS_PROXY="
+set "ALL_PROXY="
+set "ANTHROPIC_AUTH_TOKEN="
+set "ANTHROPIC_API_KEY="
+set "CLAUDE_CODE_OAUTH_TOKEN=sk-your-key-from-config"
+set "CLAUDE_CODE_OAUTH_SCOPES=user:inference user:profile"
+set "CLAUDE_CODE_SUBSCRIPTION_TYPE=max"
+set "CLAUDE_CODE_RATE_LIMIT_TIER=default"
+set "CLAUDE_CODE_SIMPLE="
+set "CLAUDE_CODE_ENABLE_TODO_TOOLS=1"
+set "CLAUDE_CODE_USE_POWERSHELL_TOOL=1"
+set "CLAUDE_CODE_ATTRIBUTION_HEADER=0"
+set "CLAUDE_CODE_EFFORT_LEVEL=xhigh"
+set "CLAUDE_CODE_GATEWAY_HINT_HEADERS=1"
+set "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1"
+set "DISABLE_AUTOUPDATER=1"
+claude %*
+endlocal
+```
 
 **Sign out of the standard Claude login first.** Claude Code keeps its own claude.ai login
 (or API key) in its config folder, and a stored login can take precedence over
