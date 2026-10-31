@@ -87,7 +87,7 @@ writes):
 | `CLAUDE_CODE_EFFORT_LEVEL` | `xhigh` | Default effort (`low` ... `max`), mapped to a thinking budget. |
 | `DISABLE_AUTOUPDATER` | `1` | The client must not replace itself with a build you did not test. |
 | `CLAUDE_CODE_USE_POWERSHELL_TOOL` | `1` (Windows with PowerShell only) | Shell tool selection on Windows. |
-| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_SIMPLE` | **empty / unset** | A leftover value would bypass the gateway, override the token, or switch the client into its reduced "simple" mode. |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_SIMPLE` | **set to an empty value** (not just left out) | A leftover value would bypass the gateway, override the token, or switch the client into its reduced "simple" mode. |
 
 Leaving any of them out (or keeping a stale proxy, key or stored login) is the usual reason
 the client bypasses the gateway, loses the fast tier for helper requests, or breaks the prompt
@@ -109,7 +109,8 @@ export CLAUDE_CODE_ATTRIBUTION_HEADER=0
 export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
 export CLAUDE_CODE_EFFORT_LEVEL=xhigh
 export DISABLE_AUTOUPDATER=1
-unset HTTP_PROXY HTTPS_PROXY ALL_PROXY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_SIMPLE
+export HTTP_PROXY="" HTTPS_PROXY="" ALL_PROXY=""
+export ANTHROPIC_AUTH_TOKEN="" ANTHROPIC_API_KEY="" CLAUDE_CODE_SIMPLE=""
 claude
 ```
 

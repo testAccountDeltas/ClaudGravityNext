@@ -172,7 +172,12 @@ export ANTHROPIC_BASE_URL="https://$PUBLIC_HOST:$TLS_PORT"
 export HTTPS_PROXY="http://$PROXY_SECRET:x@$CONNECT_HOST:$CONNECT_PORT"
 export SSL_CERT_FILE="$INSTALL_DIR/ca.pem"
 export NODE_EXTRA_CA_CERTS="$INSTALL_DIR/ca.pem"
-unset HTTP_PROXY ALL_PROXY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_SIMPLE
+# set to empty on purpose (not unset), same as the Windows launcher
+export HTTP_PROXY=""
+export ALL_PROXY=""
+export ANTHROPIC_AUTH_TOKEN=""
+export ANTHROPIC_API_KEY=""
+export CLAUDE_CODE_SIMPLE=""
 export CLAUDE_CODE_OAUTH_TOKEN="$API_KEY"
 export CLAUDE_CODE_OAUTH_SCOPES="user:inference user:profile"
 export CLAUDE_CODE_SUBSCRIPTION_TYPE="max"
