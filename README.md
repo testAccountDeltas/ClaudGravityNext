@@ -175,14 +175,6 @@ server's firewall).
 > put the gateway behind a VPN, an SSH tunnel, or a reverse proxy with TLS (then use that
 > `https://` address as `ANTHROPIC_BASE_URL`).
 
-**Known limitation: `/usage`.** In this setup Claude Code asks `api.anthropic.com` directly for
-the per-model usage breakdown (that address is hard-coded in the client and cannot be pointed at
-the gateway). With a gateway key Anthropic answers `429` with `Retry-After: 3600`, so `/usage`
-shows "Per-model breakdown unavailable (rate limited until ...)". Everything else on that screen
-(session cost, tokens, prompt-cache line, the session and weekly bars) comes from the gateway's
-own response headers and works. The error text is cosmetic; it is not a gateway failure and
-does not limit your requests.
-
 Quick check that the gateway is alive:
 
 ```
