@@ -11,6 +11,10 @@ Claude Code ──▶  ClaudGravityNext  ──▶  Gemini
  (Anthropic API)   translate · pool · retry
 ```
 
+![Claude Code running through ClaudGravityNext: a session and the /usage screen with the usage bars and prompt-cache line](img/1.png)
+
+*Claude Code talking to Gemini through the gateway: the normal chat, and `/usage` with its usage bars and prompt-cache status.*
+
 ## Why you might want it
 
 - **Drop-in for Claude Code.** `ANTHROPIC_BASE_URL` plus a key, nothing else to patch.
