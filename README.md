@@ -125,6 +125,6 @@ the format and a coverage floor.
 
 ## Status and disclaimer
 
-This is an independent, unofficial project. It is not affiliated with or endorsed by
+Released under the [MIT License](LICENSE). This is an independent, unofficial project. It is not affiliated with or endorsed by
 Anthropic or Google. You are responsible for following the terms of service of the accounts
 and services you connect to it.
