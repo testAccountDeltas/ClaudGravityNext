@@ -67,21 +67,68 @@ Open <http://localhost:8898/> (user `admin`, password = `dashboard_password` fro
 
 **5. Use it from Claude Code**
 
+The simplest way is the client installer below; it writes this environment for you. To do it
+by hand on the same machine as the gateway (bash; on Windows use `set "NAME=value"` in a `.cmd`):
+
 ```
-export ANTHROPIC_BASE_URL=http://localhost:8898
-export ANTHROPIC_AUTH_TOKEN=sk-your-key-from-config
+export CLAUDE_CONFIG_DIR="$HOME/.claudgravitynext/profile"
+export ANTHROPIC_BASE_URL="http://localhost:8898"
+export CLAUDE_CODE_OAUTH_TOKEN="sk-your-key-from-config"
+export CLAUDE_CODE_OAUTH_SCOPES="user:inference user:profile"
+export CLAUDE_CODE_SUBSCRIPTION_TYPE="max"
+export CLAUDE_CODE_RATE_LIMIT_TIER="default"
+export _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1
 export CLAUDE_CODE_GATEWAY_HINT_HEADERS=1
+export CLAUDE_CODE_ATTRIBUTION_HEADER=0
+export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+export CLAUDE_CODE_EFFORT_LEVEL=xhigh
+export DISABLE_AUTOUPDATER=1
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
 claude
 ```
 
-`CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` makes Claude Code label its requests, so small helper
-calls (titles, summaries) go to a fast tier instead of waiting behind heavy reasoning.
+What each one is for:
 
-Quick check that it's alive:
+| Variable | Why it is there |
+|---|---|
+| `CLAUDE_CONFIG_DIR` | Separate profile, so the gateway session does not share login or history with a real Claude account on the same machine. |
+| `ANTHROPIC_BASE_URL` | Where the gateway listens. Over the network use `https://<host>:<tls_port>` (see below). |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Your tenant key from `config.json`. Used instead of `ANTHROPIC_AUTH_TOKEN` so Claude Code runs in its signed-in mode. |
+| `CLAUDE_CODE_OAUTH_SCOPES`, `_SUBSCRIPTION_TYPE`, `_RATE_LIMIT_TIER` | Describe the (fake) signed-in account so Claude Code enables its normal feature set. |
+| `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1` | Treat the custom URL as the official API: the client then calls the profile/usage endpoints the gateway answers (usage bars, startup checks) and keeps the prompt cache warm. |
+| `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` | Claude Code labels each request (main / subagent / helper). Without it every helper call (titles, summaries) is treated as a heavy request and can stall for 20-60 s. |
+| `CLAUDE_CODE_ATTRIBUTION_HEADER=0` | Drops the per-request attribution block, which would otherwise change the prompt prefix and break caching. |
+| `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` | Keeps the todo tools available. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | Default effort (`low` ... `max`), mapped to a thinking budget. |
+| `DISABLE_AUTOUPDATER=1` | The client must not replace itself with a build you did not test. |
+| unset proxies / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` | A leftover value would bypass the gateway or override the token above. |
+
+On Windows with PowerShell as the shell tool, also set `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`.
+
+If the gateway is on **another machine**, Claude Code also has to reach its official-looking
+hostnames through the gateway and trust its certificate. Add:
+
+```
+export ANTHROPIC_BASE_URL="https://<gateway-host>:<tls_port>"          # tls_port = port + 2
+export HTTPS_PROXY="http://<proxy_secret>:x@<gateway-host>:<connect_port>"   # connect_port = port + 1
+export SSL_CERT_FILE="/path/to/ca.pem"
+export NODE_EXTRA_CA_CERTS="/path/to/ca.pem"
+```
+
+`proxy_secret` is in the gateway's `config.json`; the CA certificate is `ca/superrelay-ca.pem`
+on the gateway (the file is public, the matching `.key` never leaves that machine). The client
+installer below fetches all of this from `http://<host>:<port>/api/bootstrap?key=<your key>`,
+so you only need the address and the key.
+
+Quick check that the gateway is alive:
 
 ```
 curl -H "x-api-key: sk-your-key-from-config" http://localhost:8898/v1/models
 ```
+
+> This is the environment the installer writes. The variables have not each been tested in
+> isolation, so the "why" column describes intent; if something misbehaves, start from the
+> full list rather than a subset.
 
 ### One-line client setup (optional)
 
