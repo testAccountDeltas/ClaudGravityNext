@@ -69,45 +69,36 @@ $ApiKey = $ApiKey.Trim()
 if ($GatewayUrl -notmatch ':\d+$') {
     $GatewayUrl = "$GatewayUrl`:8898"
 }
-$ConnectHost, $ConnectPort = $GatewayUrl -split ':', 2
+$GatewayHost, $GatewayPort = $GatewayUrl -split ':', 2
+$BaseUrl = "http://$GatewayHost`:$GatewayPort"
 
-Write-Step "Fetching settings from the gateway ($ConnectHost`:$ConnectPort)..."
+# Plain HTTP to the gateway's API port: no CONNECT proxy and no CA are needed.
+# (HTTPS_PROXY / SSL_CERT_FILE are left empty in the launcher on purpose.)
+Write-Step "Checking the gateway ($BaseUrl)..."
 try {
-    $bootstrap = Invoke-RestMethod -Uri "http://$ConnectHost`:$ConnectPort/api/bootstrap?key=$ApiKey" -Method Get -TimeoutSec 10
+    $null = Invoke-RestMethod -Uri "$BaseUrl/v1/models" -Headers @{ "x-api-key" = $ApiKey } -Method Get -TimeoutSec 10
 } catch {
-    Write-Host "Could not reach the gateway, or the key is wrong: $_" -ForegroundColor Red
+    $status = $null
+    if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+    if ($status -eq 401) {
+        Write-Host "The gateway rejected the API key (HTTP 401)." -ForegroundColor Red
+    } else {
+        Write-Host "Could not reach the gateway at $BaseUrl. Check the address, port and firewall: $_" -ForegroundColor Red
+    }
     exit 1
 }
-if (-not $bootstrap.ca_pem) {
-    Write-Host "Gateway responded but did not return a CA certificate -- check the gateway version." -ForegroundColor Red
-    exit 1
-}
-
-$PublicHost = $bootstrap.public_host
-if (-not $PublicHost -or $PublicHost -eq "localhost") { $PublicHost = $ConnectHost }
-$TlsPort = $bootstrap.tls_port
-$ProxySecret = $bootstrap.proxy_secret
-# The CONNECT proxy listens on its own port (API port + 1 by default), not on the API port
-# the user typed in; the gateway reports the real one.
-if ($bootstrap.connect_port) { $ConnectPort = [string]$bootstrap.connect_port }
-Write-Ok "OK -- tls_port=$TlsPort public_host=$PublicHost"
+Write-Ok "OK -- gateway reachable, key accepted"
 
 # --- 2. save local files ---
 Write-Step "Saving configuration to $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-$CaPath = Join-Path $InstallDir "ca.pem"
-Set-Content -Path $CaPath -Value $bootstrap.ca_pem -Encoding ascii -NoNewline
 
 $configObj = @{
-    gateway_host = $ConnectHost
-    connect_port = $ConnectPort
-    tls_port     = $TlsPort
-    public_host  = $PublicHost
-    proxy_secret = $ProxySecret
-    api_key      = $ApiKey
+    base_url = $BaseUrl
+    api_key  = $ApiKey
 }
 $configObj | ConvertTo-Json | Set-Content -Path (Join-Path $InstallDir "config.json") -Encoding utf8
-Write-Ok "ca.pem + config.json saved"
+Write-Ok "config.json saved"
 
 # --- 3. find claude ---
 # Search order, deliberately: VS Code extension (the most common way people
@@ -192,11 +183,9 @@ $launchLines = @(
     "setlocal",
     "",
     "set ""CLAUDE_CONFIG_DIR=$InstallDir\profile""",
-    "set ""ANTHROPIC_BASE_URL=https://$PublicHost`:$TlsPort""",
-    "set ""HTTPS_PROXY=http://$ProxySecret`:x@$ConnectHost`:$ConnectPort""",
-    "set ""SSL_CERT_FILE=$CaPath""",
-    "set ""NODE_EXTRA_CA_CERTS=$CaPath""",
+    "set ""ANTHROPIC_BASE_URL=$BaseUrl""",
     "set ""HTTP_PROXY=""",
+    "set ""HTTPS_PROXY=""",
     "set ""ALL_PROXY=""",
     "set ""ANTHROPIC_AUTH_TOKEN=""",
     "set ""ANTHROPIC_API_KEY=""",
@@ -213,7 +202,7 @@ $launchLines = @(
     "set ""_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1""",
     "set ""DISABLE_AUTOUPDATER=1""",
     "",
-    "echo ClaudGravityNext -^> $ConnectHost`:$ConnectPort ($foundVia)",
+    "echo ClaudGravityNext -^> $BaseUrl ($foundVia)",
     """$ClaudeCmd"" %*",
     "endlocal"
 )

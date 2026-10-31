@@ -75,7 +75,7 @@ writes):
 | Variable | Value | Why |
 |---|---|---|
 | `CLAUDE_CONFIG_DIR` | a new empty folder, e.g. `~/.claudgravitynext/profile` | Separate profile, so the session shares no login or history with a real Claude account. |
-| `ANTHROPIC_BASE_URL` | `http://localhost:8898` | Where the gateway listens (see "another machine" below for remote). |
+| `ANTHROPIC_BASE_URL` | `http://localhost:8898` | Where the gateway listens, plain HTTP on the API port. For a gateway on another machine use `http://<host>:<port>` (see below). |
 | `CLAUDE_CODE_OAUTH_TOKEN` | your tenant key (`sk-...` from `config.json`) | Used instead of `ANTHROPIC_AUTH_TOKEN`, so Claude Code runs in its signed-in mode. |
 | `CLAUDE_CODE_OAUTH_SCOPES` | `user:inference user:profile` | Describes the (fake) signed-in account. |
 | `CLAUDE_CODE_SUBSCRIPTION_TYPE` | `max` | Same: enables the normal feature set. |
@@ -161,20 +161,15 @@ with has no stored login:
 - If the client says "Please run /login" or shows your real Claude account in `/status`, a
   stored login is still being picked up: check `CLAUDE_CONFIG_DIR` is set in that terminal.
 
-**Gateway on another machine.** Claude Code must also reach the gateway's official-looking
-hostnames through it and trust its certificate. Change `ANTHROPIC_BASE_URL` and add three more:
+**Gateway on another machine.** Nothing extra is needed: set `ANTHROPIC_BASE_URL` to
+`http://<gateway-host>:<port>` (the same API port, `8898` by default) and keep the proxy
+variables empty, exactly as in the table above. There is no CONNECT proxy or certificate to
+configure on the client. The port must be reachable from your machine (open it in the
+server's firewall).
 
-| Variable | Value |
-|---|---|
-| `ANTHROPIC_BASE_URL` | `https://<gateway-host>:<tls_port>` (`tls_port` = port + 2) |
-| `HTTPS_PROXY` | `http://<proxy_secret>:x@<gateway-host>:<connect_port>` (`connect_port` = port + 1) |
-| `SSL_CERT_FILE` | path to the gateway's CA certificate |
-| `NODE_EXTRA_CA_CERTS` | the same path |
-
-`proxy_secret` is in the gateway's `config.json`; the CA certificate is `ca/superrelay-ca.pem`
-on the gateway (the certificate is public, the matching `.key` never leaves that machine). The
-client installer fetches all of this from `http://<host>:<port>/api/bootstrap?key=<your key>`,
-so you only need the address and the key.
+> Traffic is plain HTTP, so your API key crosses the network unencrypted. Over the internet,
+> put the gateway behind a VPN, an SSH tunnel, or a reverse proxy with TLS (then use that
+> `https://` address as `ANTHROPIC_BASE_URL`).
 
 Quick check that the gateway is alive:
 
@@ -184,10 +179,11 @@ curl -H "x-api-key: sk-your-key-from-config" http://localhost:8898/v1/models
 
 ### One-line client setup (optional)
 
-If the gateway runs on another machine, a helper script configures Claude Code on yours: it
-fetches the gateway's CA certificate and settings, writes a launcher, and adds a
+A helper script configures Claude Code on your machine: it checks that the gateway answers
+and accepts your key, writes a launcher with the full environment from step 5, and adds a
 "ClaudGravityNext: Open Claude Code here" entry to the folder context menu (Windows) or a
-`claudgravity` shell command (macOS/Linux). You only need the gateway address and your API key.
+`claudgravity` shell command (macOS/Linux). You only need the gateway address (host and API
+port, e.g. `203.0.113.10:8898`) and your API key.
 
 ```
 # Windows (PowerShell)
@@ -225,8 +221,9 @@ and delete keys from the dashboard.
 
 Set `server.public_host` to the server's address and put the gateway behind a firewall or a
 reverse proxy with TLS — the dashboard is protected by a password, but it is not meant to be
-exposed bare to the internet. The gateway also exposes an HTTPS listener (`port + 2`) signed
-by its own CA in `ca/`, and a CONNECT proxy (`port + 1`).
+exposed bare to the internet. The gateway also opens an HTTPS listener (`port + 2`, signed by
+its own CA in `ca/`) and a CONNECT proxy (`port + 1`); the client setup above does not use
+either, so you can leave those ports closed.
 
 ## Keep your secrets out of git
 

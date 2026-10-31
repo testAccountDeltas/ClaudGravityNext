@@ -58,53 +58,30 @@ fi
 if [[ "$GATEWAY_URL" != *:* ]]; then
   GATEWAY_URL="$GATEWAY_URL:8898"
 fi
-CONNECT_HOST="${GATEWAY_URL%%:*}"
-CONNECT_PORT="${GATEWAY_URL##*:}"
+GATEWAY_HOST="${GATEWAY_URL%%:*}"
+GATEWAY_PORT="${GATEWAY_URL##*:}"
+BASE_URL="http://$GATEWAY_HOST:$GATEWAY_PORT"
 
-say "Fetching settings from the gateway ($CONNECT_HOST:$CONNECT_PORT)..."
-BOOTSTRAP_JSON="$(curl -fsS -m 10 "http://$CONNECT_HOST:$CONNECT_PORT/api/bootstrap?key=$API_KEY" || true)"
-if [ -z "$BOOTSTRAP_JSON" ]; then
-  echo "Could not reach the gateway, or the key is wrong." >&2
-  exit 1
-fi
-
-json_get() { printf '%s' "$BOOTSTRAP_JSON" | sed -n "s/.*\"$1\":\"\\?\\([^\",}]*\\).*/\\1/p" | head -1; }
-# ca_pem contains \n escapes and embedded quotes-free PEM text; extract separately.
-PUBLIC_HOST="$(json_get public_host)"
-TLS_PORT="$(json_get tls_port)"
-PROXY_SECRET="$(json_get proxy_secret)"
-# The CONNECT proxy listens on its own port (API port + 1 by default), not on the API port
-# the user typed in; the gateway reports the real one.
-BOOT_CONNECT_PORT="$(json_get connect_port)"
-if [ -n "$BOOT_CONNECT_PORT" ]; then CONNECT_PORT="$BOOT_CONNECT_PORT"; fi
-CA_PEM="$(printf '%s' "$BOOTSTRAP_JSON" | sed -n 's/.*"ca_pem":"\([^"]*\)".*/\1/p')"
-
-if [ -z "$CA_PEM" ] || [ -z "$TLS_PORT" ]; then
-  echo "Gateway responded but did not return a CA certificate / tls_port - check the gateway version." >&2
-  echo "Raw response: $BOOTSTRAP_JSON" >&2
-  exit 1
-fi
-if [ -z "$PUBLIC_HOST" ] || [ "$PUBLIC_HOST" = "localhost" ]; then
-  PUBLIC_HOST="$CONNECT_HOST"
-fi
-ok "OK - tls_port=$TLS_PORT public_host=$PUBLIC_HOST"
+# Plain HTTP to the gateway's API port: no CONNECT proxy and no CA are needed.
+# (HTTPS_PROXY / SSL_CERT_FILE are left empty in the launcher on purpose.)
+say "Checking the gateway ($BASE_URL)..."
+CODE="$(curl -s -o /dev/null -m 10 -w '%{http_code}' -H "x-api-key: $API_KEY" "$BASE_URL/v1/models" || true)"
+case "$CODE" in
+  200) ok "OK - gateway reachable, key accepted" ;;
+  401) echo "The gateway rejected the API key (HTTP 401)." >&2; exit 1 ;;
+  *)   echo "Could not reach the gateway at $BASE_URL (HTTP ${CODE:-none}). Check the address, port and firewall." >&2; exit 1 ;;
+esac
 
 # --- 2. save local files ---
 say "Saving configuration to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-# %b un-escapes the \n sequences the JSON encoding left literal.
-printf '%b' "$CA_PEM" > "$INSTALL_DIR/ca.pem"
-cat > "$INSTALL_DIR/config.json" <<EOF
+cat > "$INSTALL_DIR/config.json" <<EOF2
 {
-  "gateway_host": "$CONNECT_HOST",
-  "connect_port": "$CONNECT_PORT",
-  "tls_port": "$TLS_PORT",
-  "public_host": "$PUBLIC_HOST",
-  "proxy_secret": "$PROXY_SECRET",
+  "base_url": "$BASE_URL",
   "api_key": "$API_KEY"
 }
-EOF
-ok "ca.pem + config.json saved"
+EOF2
+ok "config.json saved"
 
 # --- 3. find claude ---
 # Order: VS Code extension -> PATH/environment -> native install paths.
@@ -172,12 +149,10 @@ LAUNCH_PATH="$INSTALL_DIR/launch.sh"
 cat > "$LAUNCH_PATH" <<EOF
 #!/usr/bin/env bash
 export CLAUDE_CONFIG_DIR="$INSTALL_DIR/profile"
-export ANTHROPIC_BASE_URL="https://$PUBLIC_HOST:$TLS_PORT"
-export HTTPS_PROXY="http://$PROXY_SECRET:x@$CONNECT_HOST:$CONNECT_PORT"
-export SSL_CERT_FILE="$INSTALL_DIR/ca.pem"
-export NODE_EXTRA_CA_CERTS="$INSTALL_DIR/ca.pem"
+export ANTHROPIC_BASE_URL="$BASE_URL"
 # set to empty on purpose (not unset), same as the Windows launcher
 export HTTP_PROXY=""
+export HTTPS_PROXY=""
 export ALL_PROXY=""
 export ANTHROPIC_AUTH_TOKEN=""
 export ANTHROPIC_API_KEY=""
@@ -193,7 +168,7 @@ export CLAUDE_CODE_EFFORT_LEVEL=xhigh
 export CLAUDE_CODE_GATEWAY_HINT_HEADERS=1
 export _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1
 export DISABLE_AUTOUPDATER=1
-echo "ClaudGravityNext -> $CONNECT_HOST:$CONNECT_PORT ($FOUND_VIA)"
+echo "ClaudGravityNext -> $BASE_URL ($FOUND_VIA)"
 exec "$CLAUDE_CMD" "\$@"
 EOF
 chmod +x "$LAUNCH_PATH"
