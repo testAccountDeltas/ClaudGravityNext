@@ -10,6 +10,8 @@ package toolargs
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"regexp"
 	"strings"
 )
@@ -86,8 +88,18 @@ func PruneTopLevelNulls(argsRaw string) string {
 func decodeUseNumber(raw string, v interface{}) error {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
-	return dec.Decode(v)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	// Decode stops after the first value; trailing bytes ("{}0") make the
+	// document invalid, and an invalid document must be left untouched.
+	if _, err := dec.Token(); err != io.EOF {
+		return errTrailingData
+	}
+	return nil
 }
+
+var errTrailingData = errors.New("trailing data after JSON value")
 
 func marshalNoEscape(v interface{}) ([]byte, error) {
 	var buf bytes.Buffer
