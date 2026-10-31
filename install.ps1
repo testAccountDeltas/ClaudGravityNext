@@ -87,6 +87,9 @@ $PublicHost = $bootstrap.public_host
 if (-not $PublicHost -or $PublicHost -eq "localhost") { $PublicHost = $ConnectHost }
 $TlsPort = $bootstrap.tls_port
 $ProxySecret = $bootstrap.proxy_secret
+# The CONNECT proxy listens on its own port (API port + 1 by default), not on the API port
+# the user typed in; the gateway reports the real one.
+if ($bootstrap.connect_port) { $ConnectPort = [string]$bootstrap.connect_port }
 Write-Ok "OK -- tls_port=$TlsPort public_host=$PublicHost"
 
 # --- 2. save local files ---

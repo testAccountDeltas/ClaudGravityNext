@@ -73,6 +73,10 @@ json_get() { printf '%s' "$BOOTSTRAP_JSON" | sed -n "s/.*\"$1\":\"\\?\\([^\",}]*
 PUBLIC_HOST="$(json_get public_host)"
 TLS_PORT="$(json_get tls_port)"
 PROXY_SECRET="$(json_get proxy_secret)"
+# The CONNECT proxy listens on its own port (API port + 1 by default), not on the API port
+# the user typed in; the gateway reports the real one.
+BOOT_CONNECT_PORT="$(json_get connect_port)"
+if [ -n "$BOOT_CONNECT_PORT" ]; then CONNECT_PORT="$BOOT_CONNECT_PORT"; fi
 CA_PEM="$(printf '%s' "$BOOTSTRAP_JSON" | sed -n 's/.*"ca_pem":"\([^"]*\)".*/\1/p')"
 
 if [ -z "$CA_PEM" ] || [ -z "$TLS_PORT" ]; then
