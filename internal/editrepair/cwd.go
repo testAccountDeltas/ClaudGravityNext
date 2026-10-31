@@ -89,23 +89,30 @@ func IsAbsPath(p string) bool { return isAbsPath(p) }
 func JoinCWD(cwd, path string) string { return joinCWD(cwd, path) }
 
 func isAbsPath(p string) bool {
-	if filepath.IsAbs(p) {
-		return true
-	}
+	return filepath.IsAbs(p) || hasDriveOrUNC(p)
+}
+
+// hasDriveOrUNC reports a drive-qualified ("C:\x", "c:/x") or UNC ("\\host\share",
+// "//host/share") path, whatever the host OS.
+func hasDriveOrUNC(p string) bool {
 	if len(p) >= 3 && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z')) && p[1] == ':' && (p[2] == '\\' || p[2] == '/') {
 		return true
 	}
-	if len(p) >= 2 && (p[0] == '\\' || p[0] == '/') && p[0] == p[1] {
-		return true
-	}
-	return false
+	return len(p) >= 2 && (p[0] == '\\' || p[0] == '/') && p[0] == p[1]
 }
 
 func joinCWD(cwd, path string) string {
+	winCWD := strings.Contains(cwd, "\\")
+	// Against a Windows cwd only a drive-qualified or UNC path is absolute; a
+	// rooted "/sub/f.go" is relative to the cwd. filepath.IsAbs calls it
+	// absolute on a Unix host, so it cannot decide this alone.
+	if winCWD && !hasDriveOrUNC(path) {
+		return strings.TrimRight(cwd, "\\/") + "\\" + strings.TrimLeft(path, "\\/")
+	}
 	if isAbsPath(path) {
 		return path
 	}
-	if strings.Contains(cwd, "\\") {
+	if winCWD {
 		return strings.TrimRight(cwd, "\\/") + "\\" + strings.TrimLeft(path, "\\/")
 	}
 	return filepath.Join(cwd, path)
