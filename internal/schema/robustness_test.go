@@ -116,6 +116,7 @@ func timed(t *testing.T, name string, limit time.Duration, f func() string) stri
 	t.Helper()
 	start := time.Now()
 	out := f()
+	limit *= raceSlowdown
 	if d := time.Since(start); d > limit {
 		t.Fatalf("%s took %v (limit %v)", name, d, limit)
 	}
