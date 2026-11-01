@@ -8,6 +8,9 @@
 #   $env:CLAUDGRAVITY_KEY = "sk-..."
 #   irm https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.ps1 | iex
 #
+# Optional proxy mode (gateway answers Claude Code's own api.anthropic.com calls, e.g. /usage):
+#   $env:CLAUDGRAVITY_PROXY = "1"   before the one-liner (or run the saved file with -Proxy)
+#
 # Uninstall (download first -- piped iex can't take switches):
 #   irm https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.ps1 -OutFile install.ps1
 #   .\install.ps1 -Uninstall
@@ -22,6 +25,12 @@
 # two silently corrupts the script either way it's invoked.
 
 $IsUninstall = ($env:CLAUDGRAVITY_UNINSTALL -eq "1") -or ($args -contains "-Uninstall")
+
+# Optional proxy mode: route Claude Code's own api.anthropic.com calls (the
+# /usage panel, bootstrap, ...) through the gateway's CONNECT proxy so the
+# gateway answers them instead of Anthropic. Needs the gateway's CONNECT port
+# (API port + 1) reachable. Enable with $env:CLAUDGRAVITY_PROXY = "1" or -Proxy.
+$UseProxy = ($env:CLAUDGRAVITY_PROXY -eq "1") -or ($args -contains "-Proxy")
 
 $ErrorActionPreference = "Stop"
 $InstallDir = Join-Path $env:LOCALAPPDATA "ClaudGravityNext"
@@ -89,9 +98,44 @@ try {
 }
 Write-Ok "OK -- gateway reachable, key accepted"
 
+# --- 1b. proxy mode: fetch the CA, proxy secret and CONNECT port ---
+$ProxyUrl = ""
+$CaPath = ""
+if ($UseProxy) {
+    Write-Step "Proxy mode: reading the gateway's proxy settings"
+    try {
+        $boot = Invoke-RestMethod -Uri "$BaseUrl/api/bootstrap" -Headers @{ "Authorization" = "Bearer $ApiKey" } -Method Get -TimeoutSec 10
+    } catch {
+        Write-Host "Could not read $BaseUrl/api/bootstrap: $_" -ForegroundColor Red
+        exit 1
+    }
+    if (-not $boot.proxy_secret -or -not $boot.ca_pem -or -not $boot.connect_port) {
+        Write-Host "The gateway did not return a proxy secret, CA and CONNECT port. Is proxy_secret set in its config.json?" -ForegroundColor Red
+        exit 1
+    }
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    try {
+        $iar = $tcp.BeginConnect($GatewayHost, [int]$boot.connect_port, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne(5000) -or -not $tcp.Connected) { throw "timed out" }
+    } catch {
+        Write-Host "The CONNECT proxy port $GatewayHost`:$($boot.connect_port) is not reachable. Open it in the firewall (it is the API port + 1), or install without -Proxy." -ForegroundColor Red
+        exit 1
+    } finally {
+        $tcp.Close()
+    }
+    $secretEnc = [uri]::EscapeDataString([string]$boot.proxy_secret)
+    $ProxyUrl = "http://$secretEnc`:x@$GatewayHost`:$($boot.connect_port)"
+    Write-Ok "CONNECT proxy reachable on port $($boot.connect_port)"
+}
+
 # --- 2. save local files ---
 Write-Step "Saving configuration to $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+if ($UseProxy) {
+    $CaPath = Join-Path $InstallDir "ca.pem"
+    Set-Content -Path $CaPath -Value ([string]$boot.ca_pem) -Encoding ascii
+    Write-Ok "ca.pem saved"
+}
 
 $configObj = @{
     base_url = $BaseUrl
@@ -178,6 +222,11 @@ if ($WtPath) {
 # --- 5. write launch.cmd ---
 Write-Step "Writing launch.cmd"
 $LaunchPath = Join-Path $InstallDir "launch.cmd"
+# In proxy mode the CA is trusted through NODE_EXTRA_CA_CERTS and HTTPS_PROXY
+# carries the proxy secret; "%" must be doubled inside a .cmd file.
+$httpsProxyValue = $ProxyUrl -replace '%', '%%'
+$caLines = @()
+if ($UseProxy) { $caLines = @("set ""NODE_EXTRA_CA_CERTS=$CaPath""") }
 $launchLines = @(
     "@echo off",
     "setlocal",
@@ -185,8 +234,8 @@ $launchLines = @(
     "set ""CLAUDE_CONFIG_DIR=$InstallDir\profile""",
     "set ""ANTHROPIC_BASE_URL=$BaseUrl""",
     "set ""HTTP_PROXY=""",
-    "set ""HTTPS_PROXY=""",
-    "set ""ALL_PROXY=""",
+    "set ""HTTPS_PROXY=$httpsProxyValue""",
+    "set ""ALL_PROXY=""") + $caLines + @(
     "set ""ANTHROPIC_AUTH_TOKEN=""",
     "set ""ANTHROPIC_API_KEY=""",
     "set ""CLAUDE_CODE_OAUTH_TOKEN=$ApiKey""",

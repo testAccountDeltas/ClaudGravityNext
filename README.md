@@ -167,8 +167,8 @@ with has no stored login:
 
 **Gateway on another machine.** Nothing extra is needed: set `ANTHROPIC_BASE_URL` to
 `http://<gateway-host>:<port>` (the same API port, `8898` by default) and keep the proxy
-variables empty, exactly as in the table above. There is no CONNECT proxy or certificate to
-configure on the client. The port must be reachable from your machine (open it in the
+variables empty, exactly as in the table above. No certificate is needed on the client (the
+optional proxy mode below is the only exception). The port must be reachable from your machine (open it in the
 server's firewall).
 
 > Traffic is plain HTTP, so your API key crosses the network unencrypted. Over the internet,
@@ -201,6 +201,18 @@ Set `CLAUDGRAVITY_URL` and `CLAUDGRAVITY_KEY` beforehand to skip the prompts. Re
 before piping it into a shell; uninstall with `bash install.sh --uninstall` or
 `.\install.ps1 -Uninstall`.
 
+**Optional proxy mode.** Claude Code asks `api.anthropic.com` directly for a few things that
+are not model calls, for example the per-model breakdown in `/usage`, which then shows
+"Per-model breakdown unavailable (rate limited ...)". That address is hard-coded in the
+client. To have the gateway answer those calls instead, install with `--proxy`
+(`bash install.sh --proxy`, or `$env:CLAUDGRAVITY_PROXY = "1"` before the PowerShell
+one-liner). The installer then reads `/api/bootstrap` (key-protected) for the gateway's CA
+and proxy secret, saves the CA next to the launcher, and sets `HTTPS_PROXY` and
+`NODE_EXTRA_CA_CERTS`. It needs `proxy_secret` set in `config.json` and the CONNECT port
+(API port + 1) reachable from your machine; it stops with a clear message otherwise. Without
+`--proxy` nothing changes: plain HTTP to the API port, and everything except that one line
+of `/usage` works.
+
 `start.bat` / `start.sh` start the gateway from its own folder (they stop a previous instance
 on Windows and check that `config.json` exists).
 
@@ -226,8 +238,8 @@ and delete keys from the dashboard.
 Set `server.public_host` to the server's address and put the gateway behind a firewall or a
 reverse proxy with TLS — the dashboard is protected by a password, but it is not meant to be
 exposed bare to the internet. The gateway also opens an HTTPS listener (`port + 2`, signed by
-its own CA in `ca/`) and a CONNECT proxy (`port + 1`); the client setup above does not use
-either, so you can leave those ports closed.
+its own CA in `ca/`) and a CONNECT proxy (`port + 1`); the default client setup does not use
+either, so you can leave those ports closed unless you install clients with `--proxy`.
 
 ## Keep your secrets out of git
 

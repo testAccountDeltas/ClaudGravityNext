@@ -8,6 +8,9 @@
 #   CLAUDGRAVITY_URL="1.2.3.4:8898" CLAUDGRAVITY_KEY="sk-..." \
 #     curl -fsSL https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.sh | bash
 #
+# Optional proxy mode (gateway answers Claude Code's own api.anthropic.com calls, e.g. /usage):
+#   ... | bash -s -- --proxy      (or CLAUDGRAVITY_PROXY=1)
+#
 # Uninstall:
 #   curl -fsSL https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.sh | bash -s -- --uninstall
 
@@ -33,6 +36,23 @@ if [ "${1:-}" = "--uninstall" ]; then
   ok "Done."
   exit 0
 fi
+
+USE_PROXY=0
+[ "${CLAUDGRAVITY_PROXY:-}" = "1" ] && USE_PROXY=1
+for arg in "$@"; do [ "$arg" = "--proxy" ] && USE_PROXY=1; done
+
+# Percent-encode a string for use inside a URL's user-info part.
+urlenc() {
+  local s="$1" i c out=""
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      *) out+="$(printf '%%%02X' "'$c")" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
 
 echo ""
 echo "  ClaudGravityNext client installer"
@@ -72,9 +92,36 @@ case "$CODE" in
   *)   echo "Could not reach the gateway at $BASE_URL (HTTP ${CODE:-none}). Check the address, port and firewall." >&2; exit 1 ;;
 esac
 
+# --- 1b. proxy mode: fetch the CA, proxy secret and CONNECT port ---
+PROXY_URL=""
+CA_PEM=""
+if [ "$USE_PROXY" = "1" ]; then
+  say "Proxy mode: reading the gateway's proxy settings"
+  BOOT="$(curl -fsS -m 10 -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/bootstrap")" || {
+    echo "Could not read $BASE_URL/api/bootstrap." >&2; exit 1; }
+  PROXY_SECRET="$(printf '%s' "$BOOT" | sed -n 's/.*"proxy_secret":"\([^"]*\)".*/\1/p')"
+  CONNECT_PORT="$(printf '%s' "$BOOT" | sed -n 's/.*"connect_port":\([0-9]*\).*/\1/p')"
+  CA_PEM="$(printf '%s' "$BOOT" | sed -n 's/.*"ca_pem":"\([^"]*\)".*/\1/p' | sed 's/\\n/\
+/g')"
+  if [ -z "$PROXY_SECRET" ] || [ -z "$CONNECT_PORT" ] || [ -z "$CA_PEM" ]; then
+    echo "The gateway did not return a proxy secret, CA and CONNECT port. Is proxy_secret set in its config.json?" >&2
+    exit 1
+  fi
+  if ! (exec 3<>"/dev/tcp/$GATEWAY_HOST/$CONNECT_PORT") 2>/dev/null; then
+    echo "The CONNECT proxy port $GATEWAY_HOST:$CONNECT_PORT is not reachable. Open it in the firewall (it is the API port + 1), or install without --proxy." >&2
+    exit 1
+  fi
+  PROXY_URL="http://$(urlenc "$PROXY_SECRET"):x@$GATEWAY_HOST:$CONNECT_PORT"
+  ok "CONNECT proxy reachable on port $CONNECT_PORT"
+fi
+
 # --- 2. save local files ---
 say "Saving configuration to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
+if [ "$USE_PROXY" = "1" ]; then
+  printf '%s\n' "$CA_PEM" > "$INSTALL_DIR/ca.pem"
+  ok "ca.pem saved"
+fi
 cat > "$INSTALL_DIR/config.json" <<EOF2
 {
   "base_url": "$BASE_URL",
@@ -146,14 +193,17 @@ fi
 # --- 4. write launch.sh ---
 say "Writing launch.sh"
 LAUNCH_PATH="$INSTALL_DIR/launch.sh"
+CA_EXPORT="# (proxy mode off: the CA is not needed)"
+[ "$USE_PROXY" = "1" ] && CA_EXPORT="export NODE_EXTRA_CA_CERTS=\"$INSTALL_DIR/ca.pem\""
 cat > "$LAUNCH_PATH" <<EOF
 #!/usr/bin/env bash
 export CLAUDE_CONFIG_DIR="$INSTALL_DIR/profile"
 export ANTHROPIC_BASE_URL="$BASE_URL"
 # set to empty on purpose (not unset), same as the Windows launcher
 export HTTP_PROXY=""
-export HTTPS_PROXY=""
+export HTTPS_PROXY="$PROXY_URL"
 export ALL_PROXY=""
+$CA_EXPORT
 export ANTHROPIC_AUTH_TOKEN=""
 export ANTHROPIC_API_KEY=""
 export CLAUDE_CODE_SIMPLE=""
