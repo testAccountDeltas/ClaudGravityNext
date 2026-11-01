@@ -202,7 +202,6 @@ $launchLines = @(
     "set ""_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1""",
     "set ""DISABLE_AUTOUPDATER=1""",
     "",
-    "echo ClaudGravityNext -^> $BaseUrl ($foundVia)",
     """$ClaudeCmd"" %*",
     "endlocal"
 )
