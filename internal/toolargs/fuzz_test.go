@@ -2,6 +2,7 @@ package toolargs
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -18,8 +19,15 @@ func FuzzNormalizeToArgsObject(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, name, raw string) {
 		out := NormalizeToArgsObject(name, raw)
+		// The guarantee is structural (an object), not that every embedded
+		// number fits a float64 — use a decoder that keeps numbers exact
+		// (json.Number) the same way NormalizeToArgsObject's own strictDecode
+		// does, so an extreme-but-valid literal like 1E700 isn't flagged as
+		// "not an object" by this check's own number handling.
+		dec := json.NewDecoder(strings.NewReader(out))
+		dec.UseNumber()
 		var m map[string]interface{}
-		if err := json.Unmarshal([]byte(out), &m); err != nil || m == nil {
+		if err := dec.Decode(&m); err != nil || m == nil {
 			t.Fatalf("NormalizeToArgsObject(%q,%q) = %q is not a JSON object", name, raw, out)
 		}
 	})
