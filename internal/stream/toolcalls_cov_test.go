@@ -96,7 +96,7 @@ func TestCovToolCallEmitsPrefillAndFlushesHeldText(t *testing.T) {
 	if f.textHoldBuffer != "" {
 		t.Fatalf("hold buffer must be flushed: %q", f.textHoldBuffer)
 	}
-	if got := getToolSignature(f.toolCallIDs[0]); got != "SIGZ" {
+	if got := getToolSignature(f.toolCallIDs[0], ""); got != "SIGZ" {
 		t.Fatalf("tool signature = %q", got)
 	}
 }
@@ -110,7 +110,7 @@ func TestCovToolCallInheritsOpenThinkingSignature(t *testing.T) {
 	if err := f.HandleFunctionCall("Read", `{"file_path":"a"}`, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := getToolSignature(f.toolCallIDs[0]); got != "OPENSIG" {
+	if got := getToolSignature(f.toolCallIDs[0], ""); got != "OPENSIG" {
 		t.Fatalf("tool signature = %q", got)
 	}
 	if !strings.Contains(rec.Body.String(), "OPENSIG") {

@@ -14,7 +14,7 @@ func convertMsgs(t *testing.T, role, content string) []string {
 	t.Helper()
 	body := `{"messages":[{"role":"` + role + `","content":` + content + `}]}`
 	root := gjson.Parse(body)
-	out := translateMessages(`{"contents":[]}`, root, toolNameInfo{}, false, "s")
+	out := translateMessages(`{"contents":[]}`, root, toolNameInfo{}, false, "s", "")
 	var texts []string
 	gjson.Get(out, "contents.0.parts").ForEach(func(_, p gjson.Result) bool {
 		texts = append(texts, p.Get("text").String())

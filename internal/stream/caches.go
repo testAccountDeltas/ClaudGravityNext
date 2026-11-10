@@ -35,9 +35,9 @@ const (
 	toolSignatureSweepEvery = 30 * time.Minute
 )
 
-func setToolSignature(callID, signature string) { toolsig.Set(callID, signature) }
+func setToolSignature(callID, signature, model string) { toolsig.Set(callID, signature, model) }
 
-func getToolSignature(callID string) string { return toolsig.Get(callID) }
+func getToolSignature(callID, model string) string { return toolsig.Get(callID, model) }
 
 // sessionCacheFraction remembers, per session, the last REAL
 // cache_read/input_tokens ratio this conversation saw at the end of a
@@ -78,7 +78,7 @@ func (f *FSM) updatePendingThinkingSignature(sig string) {
 	if sig == "" {
 		return
 	}
-	toolsig.SetSessionSignature(f.cwdKey, sig)
+	toolsig.SetSessionSignature(f.cwdKey, sig, f.resolvedModel)
 	f.lastTurnThoughtSignature = sig
 	if f.currentBlock == BlockThinking && f.thoughtSignature == "" {
 		f.thoughtSignature = sig

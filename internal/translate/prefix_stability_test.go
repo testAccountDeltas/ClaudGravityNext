@@ -32,9 +32,9 @@ func TestPastCallWithUnknownSignature_IsSignedIdenticallyEveryTurn(t *testing.T)
 		}
 		return gjson.GetBytes(res.GeminiBody, "contents.1").Raw
 	}
-	toolsig.SetSessionSignature(session, "signature-after-turn-6")
+	toolsig.SetSessionSignature(session, "signature-after-turn-6", "")
 	first := convert()
-	toolsig.SetSessionSignature(session, "signature-after-turn-7")
+	toolsig.SetSessionSignature(session, "signature-after-turn-7", "")
 	second := convert()
 	if first != second {
 		t.Fatalf("the past call changed between turns:\n%s\n%s", first, second)
@@ -46,7 +46,7 @@ func TestPastCallWithUnknownSignature_IsSignedIdenticallyEveryTurn(t *testing.T)
 
 // A call the gateway DOES know keeps its real signature.
 func TestPastCallWithKnownSignature_KeepsIt(t *testing.T) {
-	toolsig.Set("toolu_known_sig_stability", "real-signature-xyz")
+	toolsig.Set("toolu_known_sig_stability", "real-signature-xyz", "")
 	block := gjson.Parse(`{"type":"tool_use","id":"toolu_known_sig_stability","name":"Read","input":{}}`)
 	tn := toolNameInfo{effectiveToolNames: map[string]bool{"Read": true}, disambiguatedToolName: map[string]string{}}
 	parts := convertToolUseBlock(block, "assistant", tn, true, gjson.Parse(`[]`), "any-session")

@@ -8,8 +8,10 @@
 #   CLAUDGRAVITY_URL="1.2.3.4:8898" CLAUDGRAVITY_KEY="sk-..." \
 #     curl -fsSL https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.sh | bash
 #
-# Optional proxy mode (gateway answers Claude Code's own api.anthropic.com calls, e.g. /usage):
-#   ... | bash -s -- --proxy      (or CLAUDGRAVITY_PROXY=1)
+# Proxy mode (the gateway answers Claude Code's own api.anthropic.com calls, e.g. /usage)
+# is tried automatically and skipped with a warning if the gateway cannot provide it:
+#   ... | bash -s -- --proxy      require it (or CLAUDGRAVITY_PROXY=1)
+#   ... | bash -s -- --no-proxy   skip it  (or CLAUDGRAVITY_PROXY=0)
 #
 # Uninstall:
 #   curl -fsSL https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.sh | bash -s -- --uninstall
@@ -37,9 +39,19 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
+# Proxy mode routes Claude Code's own api.anthropic.com calls (the /usage panel, ...)
+# through the gateway's CONNECT proxy so the gateway answers them. Default "auto":
+# try it and fall back to plain HTTP with a warning. "on" (--proxy or
+# CLAUDGRAVITY_PROXY=1) fails instead of falling back; "off" (--no-proxy or
+# CLAUDGRAVITY_PROXY=0) skips it.
+PROXY_MODE=auto
 USE_PROXY=0
-[ "${CLAUDGRAVITY_PROXY:-}" = "1" ] && USE_PROXY=1
-for arg in "$@"; do [ "$arg" = "--proxy" ] && USE_PROXY=1; done
+[ "${CLAUDGRAVITY_PROXY:-}" = "1" ] && PROXY_MODE=on
+[ "${CLAUDGRAVITY_PROXY:-}" = "0" ] && PROXY_MODE=off
+for arg in "$@"; do
+  [ "$arg" = "--proxy" ] && PROXY_MODE=on
+  [ "$arg" = "--no-proxy" ] && PROXY_MODE=off
+done
 
 # Percent-encode a string for use inside a URL's user-info part.
 urlenc() {
@@ -95,24 +107,42 @@ esac
 # --- 1b. proxy mode: fetch the CA, proxy secret and CONNECT port ---
 PROXY_URL=""
 CA_PEM=""
-if [ "$USE_PROXY" = "1" ]; then
-  say "Proxy mode: reading the gateway's proxy settings"
-  BOOT="$(curl -fsS -m 10 -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/bootstrap")" || {
-    echo "Could not read $BASE_URL/api/bootstrap." >&2; exit 1; }
-  PROXY_SECRET="$(printf '%s' "$BOOT" | sed -n 's/.*"proxy_secret":"\([^"]*\)".*/\1/p')"
-  CONNECT_PORT="$(printf '%s' "$BOOT" | sed -n 's/.*"connect_port":\([0-9]*\).*/\1/p')"
-  CA_PEM="$(printf '%s' "$BOOT" | sed -n 's/.*"ca_pem":"\([^"]*\)".*/\1/p' | sed 's/\\n/\
+PROXY_ERR=""
+
+# Sets PROXY_URL / CA_PEM and returns 0, or sets PROXY_ERR and returns 1.
+fetch_proxy_settings() {
+  local boot secret port
+  boot="$(curl -fsS -m 10 -H "Authorization: Bearer $API_KEY" "$BASE_URL/api/bootstrap" 2>/dev/null)" || {
+    PROXY_ERR="could not read $BASE_URL/api/bootstrap"; return 1; }
+  secret="$(printf '%s' "$boot" | sed -n 's/.*"proxy_secret":"\([^"]*\)".*/\1/p')"
+  port="$(printf '%s' "$boot" | sed -n 's/.*"connect_port":\([0-9]*\).*/\1/p')"
+  CA_PEM="$(printf '%s' "$boot" | sed -n 's/.*"ca_pem":"\([^"]*\)".*/\1/p' | sed 's/\\n/\
 /g')"
-  if [ -z "$PROXY_SECRET" ] || [ -z "$CONNECT_PORT" ] || [ -z "$CA_PEM" ]; then
-    echo "The gateway did not return a proxy secret, CA and CONNECT port. Is proxy_secret set in its config.json?" >&2
-    exit 1
+  if [ -z "$secret" ] || [ -z "$port" ] || [ -z "$CA_PEM" ]; then
+    PROXY_ERR="the gateway did not return a proxy secret, CA and CONNECT port (is proxy_secret set in its config.json?)"
+    return 1
   fi
-  if ! (exec 3<>"/dev/tcp/$GATEWAY_HOST/$CONNECT_PORT") 2>/dev/null; then
-    echo "The CONNECT proxy port $GATEWAY_HOST:$CONNECT_PORT is not reachable. Open it in the firewall (it is the API port + 1), or install without --proxy." >&2
-    exit 1
+  if ! (exec 3<>"/dev/tcp/$GATEWAY_HOST/$port") 2>/dev/null; then
+    PROXY_ERR="the CONNECT proxy port $GATEWAY_HOST:$port is not reachable (open it in the firewall: it is the API port + 1)"
+    return 1
   fi
-  PROXY_URL="http://$(urlenc "$PROXY_SECRET"):x@$GATEWAY_HOST:$CONNECT_PORT"
-  ok "CONNECT proxy reachable on port $CONNECT_PORT"
+  PROXY_URL="http://$(urlenc "$secret"):x@$GATEWAY_HOST:$port"
+  CONNECT_PORT="$port"
+  return 0
+}
+
+if [ "$PROXY_MODE" != "off" ]; then
+  say "Proxy mode: reading the gateway's proxy settings"
+  if fetch_proxy_settings; then
+    USE_PROXY=1
+    ok "CONNECT proxy reachable on port $CONNECT_PORT"
+  elif [ "$PROXY_MODE" = "on" ]; then
+    echo "Proxy mode was requested but is not available: $PROXY_ERR." >&2
+    exit 1
+  else
+    warn "Proxy mode is not available ($PROXY_ERR). Continuing with plain HTTP: everything works except the per-model line in /usage."
+    CA_PEM=""
+  fi
 fi
 
 # --- 2. save local files ---

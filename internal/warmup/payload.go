@@ -57,7 +57,19 @@ func WrapAntigravityPayload(modelName string, payload []byte, projectID string, 
 		pid = "aicode-consumers"
 	}
 
-	template := `{"project":"","model":"","userAgent":"antigravity","requestType":"agent","requestId":"","request":{}}`
+	// requestType deliberately omitted: the real Antigravity IDE client
+	// omits it entirely on the agent/chat path (it only sets one for the
+	// image_gen/search buckets this gateway doesn't send through this
+	// function). An independent gateway doing the same Claude-Code-over-
+	// Antigravity translation (9router) found that sending
+	// requestType:"agent" here makes Google bucket the request and return
+	// a detail-free 429 RESOURCE_EXHAUSTED even with quota available —
+	// and matching the real client's omission is also one less fingerprint
+	// mismatch for the account-ban risk §6 of FEATURES_AND_STRUCTURE_V2.md
+	// already names. Forced tool_choice already has an independent
+	// enforcement path (the system-prompt text duplication in
+	// translate/system.go, §3.6) that does not depend on this field.
+	template := `{"project":"","model":"","userAgent":"antigravity","requestId":"","request":{}}`
 	template, _ = sjson.Set(template, "project", pid)
 	template, _ = sjson.Set(template, "model", modelName)
 	template, _ = sjson.Set(template, "requestId", "agent-"+uuid.NewString())

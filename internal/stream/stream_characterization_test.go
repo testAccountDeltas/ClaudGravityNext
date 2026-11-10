@@ -671,7 +671,7 @@ func TestProcessGeminiChunk_CrossChunkThoughtSignatureBuffering(t *testing.T) {
 	}
 
 	// Verify session signature is updated for history replay
-	sessSig := toolsig.GetSessionSignature("sess_cross_chunk_sig")
+	sessSig := toolsig.GetSessionSignature("sess_cross_chunk_sig", "")
 	if sessSig != "real-sig-cross-chunk-123" {
 		t.Fatalf("expected session signature 'real-sig-cross-chunk-123', got '%s'", sessSig)
 	}
@@ -708,7 +708,7 @@ func TestProcessGeminiChunk_LookAheadCapturesThoughtSignatureFromLaterPart(t *te
 	if !strings.Contains(body, `"signature":"real-sig-lookahead-789"`) {
 		t.Fatalf("expected real-sig-lookahead-789 in body, got: %s", body)
 	}
-	sessSig := toolsig.GetSessionSignature("sess_lookahead_sig")
+	sessSig := toolsig.GetSessionSignature("sess_lookahead_sig", "")
 	if sessSig != "real-sig-lookahead-789" {
 		t.Fatalf("expected session signature 'real-sig-lookahead-789', got %q", sessSig)
 	}
@@ -872,7 +872,7 @@ func TestProcessGeminiChunk_CandidateLevelThoughtSignatureLookahead(t *testing.T
 func TestProcessGeminiChunk_SessionCachedThoughtSignatureUsedOnThinkingClose(t *testing.T) {
 	p := basicParams()
 	p.SessionID = "sess_cached_test_456"
-	toolsig.SetSessionSignature(p.SessionID, "real-cached-session-sig")
+	toolsig.SetSessionSignature(p.SessionID, "real-cached-session-sig", "")
 
 	rec := httptest.NewRecorder()
 	w := NewSafeSSEWriter(1, rec, rec, nil)

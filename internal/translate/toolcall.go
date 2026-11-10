@@ -19,9 +19,20 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 	var content gjson.Result
 	// opt[1] is the session id; since the session-signature fallback was
 	// removed (see below) nothing here needs it, but callers still pass it.
+	// opt[2] is the resolved target model (e.g. "gemini-3.8-flash-tiered" or
+	// "claude-sonnet-4-6" under model_overrides) — passed to toolsig.Get so
+	// a signature produced for the other family isn't replayed across the
+	// Gemini/native-Claude boundary a mid-session quota-exhaustion remap
+	// can cross. "" (not passed) accepts any family, same as before.
+	var targetModel string
 	if len(opt) > 0 {
 		if c, ok := opt[0].(gjson.Result); ok {
 			content = c
+		}
+	}
+	if len(opt) > 2 {
+		if m, ok := opt[2].(string); ok {
+			targetModel = m
 		}
 	}
 	name := p.Get("name").String()
@@ -45,7 +56,7 @@ func convertToolUseBlock(p gjson.Result, role string, tn toolNameInfo, isAntigra
 	// skip-validator bypass. If toolsig has no cached signature for callID,
 	// look for a sibling "thinking" block in this same assistant turn which
 	// carries the real signature echoed by Claude Code.
-	sig := toolsig.Get(callID)
+	sig := toolsig.Get(callID, targetModel)
 	if sig == "" && content.IsArray() {
 		content.ForEach(func(_, sibling gjson.Result) bool {
 			if sibling.Get("type").String() == "thinking" {

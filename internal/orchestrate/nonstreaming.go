@@ -221,7 +221,7 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 	}
 
 	cand := geminiJSON.Get("candidates.0")
-	cr := processCandidate(p, cand, claudeResp, claudeBodyBytes, req, cwdKey)
+	cr := processCandidate(p, cand, claudeResp, claudeBodyBytes, req, cwdKey, st.ResolvedModelName)
 	toolsCalled, toolCallIDs, toolCallSignatures := cr.toolsCalled, cr.toolCallIDs, cr.toolCallSignatures
 	textChars, thinkingChars, lastText, lastThinking := cr.textChars, cr.thinkingChars, cr.lastText, cr.lastThinking
 

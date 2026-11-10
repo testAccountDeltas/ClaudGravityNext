@@ -64,7 +64,7 @@ func TestProcessCandidate_ToolUseDropsTrailingTextBlock(t *testing.T) {
 	cand := gjson.Parse(candJSON)
 	resp := newClaudeResp()
 	p := &reqctx.Params{}
-	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess")
+	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess", "")
 
 	if len(cr.toolsCalled) != 1 || cr.toolsCalled[0] != "Read" {
 		t.Fatalf("expected exactly one tool call recorded, got %v", cr.toolsCalled)
@@ -84,7 +84,7 @@ func TestProcessCandidate_DisableParallelToolUseDropsSecondCall(t *testing.T) {
 	resp := newClaudeResp()
 	p := &reqctx.Params{}
 	claudeBody := []byte(`{"disable_parallel_tool_use":true}`)
-	cr := processCandidate(p, cand, resp, claudeBody, claude.Request{}, "sess")
+	cr := processCandidate(p, cand, resp, claudeBody, claude.Request{}, "sess", "")
 
 	if len(cr.toolsCalled) != 1 {
 		t.Fatalf("expected the second tool call to be dropped under disable_parallel_tool_use, got %v", cr.toolsCalled)
@@ -96,7 +96,7 @@ func TestProcessCandidate_ReverseToolNameMapRestoresOriginalName(t *testing.T) {
 	cand := gjson.Parse(candJSON)
 	resp := newClaudeResp()
 	p := &reqctx.Params{ReverseToolNameMap: map[string]string{"docker_run": "docker:run"}}
-	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess")
+	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess", "")
 
 	if len(cr.toolsCalled) != 1 || cr.toolsCalled[0] != "docker:run" {
 		t.Fatalf("expected the Gemini-sanitized name to be restored to the original Claude-side tool name, got %v", cr.toolsCalled)
@@ -106,7 +106,7 @@ func TestProcessCandidate_ReverseToolNameMapRestoresOriginalName(t *testing.T) {
 func TestProcessCandidate_NoCandidateReturnsZeroValue(t *testing.T) {
 	resp := newClaudeResp()
 	p := &reqctx.Params{}
-	cr := processCandidate(p, gjson.Result{}, resp, []byte(`{}`), claude.Request{}, "sess")
+	cr := processCandidate(p, gjson.Result{}, resp, []byte(`{}`), claude.Request{}, "sess", "")
 	if cr.textChars != 0 || len(cr.toolsCalled) != 0 {
 		t.Fatal("expected a zero-value result for a genuinely missing candidate")
 	}
@@ -120,7 +120,7 @@ func TestProcessCandidate_CoalescesConsecutiveTextParts(t *testing.T) {
 	cand := gjson.Parse(candJSON)
 	resp := newClaudeResp()
 	p := &reqctx.Params{}
-	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess")
+	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess", "")
 
 	blocks := resp["content"].([]map[string]interface{})
 	if len(blocks) != 1 {
@@ -141,7 +141,7 @@ func TestProcessCandidate_CoalescesGroundingSourcesWithExistingText(t *testing.T
 	cand := gjson.Parse(candJSON)
 	resp := newClaudeResp()
 	p := &reqctx.Params{}
-	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess")
+	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess", "")
 
 	blocks := resp["content"].([]map[string]interface{})
 	if len(blocks) != 1 {
@@ -161,7 +161,7 @@ func TestProcessCandidate_GroundingSourcesWithoutPrecedingTextCreatesTextBlock(t
 	cand := gjson.Parse(candJSON)
 	resp := newClaudeResp()
 	p := &reqctx.Params{}
-	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess")
+	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess", "")
 
 	blocks := resp["content"].([]map[string]interface{})
 	if len(blocks) != 1 || blocks[0]["type"] != "text" {
@@ -184,7 +184,7 @@ func TestProcessCandidate_ThinkingFollowedByMultipleTextBlocksCoalesced(t *testi
 	cand := gjson.Parse(candJSON)
 	resp := newClaudeResp()
 	p := &reqctx.Params{}
-	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess")
+	cr := processCandidate(p, cand, resp, []byte(`{}`), claude.Request{}, "sess", "")
 
 	blocks := resp["content"].([]map[string]interface{})
 	if len(blocks) != 2 {
@@ -205,7 +205,7 @@ func TestProcessCandidate_NoGroundingFooterAfterMaxTokensOrRefusal(t *testing.T)
 	for _, fr := range []string{"MAX_TOKENS", "SAFETY"} {
 		candJSON := `{"finishReason":"` + fr + `","content":{"parts":[{"text":"partial"}]},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://example.com","title":"Example"}}]}}`
 		resp := newClaudeResp()
-		processCandidate(&reqctx.Params{}, gjson.Parse(candJSON), resp, []byte(`{}`), claude.Request{}, "sess")
+		processCandidate(&reqctx.Params{}, gjson.Parse(candJSON), resp, []byte(`{}`), claude.Request{}, "sess", "")
 		blocks := resp["content"].([]map[string]interface{})
 		if txt := blocks[0]["text"].(string); strings.Contains(txt, "Sources") {
 			t.Fatalf("%s: footer must not be appended, got %q", fr, txt)

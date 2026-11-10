@@ -61,6 +61,7 @@ import (
 	"claudgravity/internal/requestlog"
 	"claudgravity/internal/speccapture"
 	"claudgravity/internal/tlsfingerprint"
+	"claudgravity/internal/toolsig"
 )
 
 func main() {
@@ -106,6 +107,15 @@ func main() {
 	// in this binary's own working directory, never shared with v1's).
 	if err := requestlog.InitLogStore(""); err != nil {
 		logx.LogGateway("[ClaudGravityNext] Warning: request log store init failed (dashboard sessions/logs will stay empty): %v", err)
+	}
+
+	// toolsig's RAM cache alone loses every cached thoughtSignature on
+	// restart, which guarantees the exact implicit-cache collapse described
+	// in FEATURES_AND_STRUCTURE_V2.md §6.4 for every session active at that
+	// moment. This SQLite-backed fallback (same db file, "" default) lets
+	// an in-flight conversation recover its signatures instead.
+	if err := toolsig.InitPersistence(""); err != nil {
+		logx.LogGateway("[ClaudGravityNext] Warning: thought-signature persistence init failed (cache will not survive a restart): %v", err)
 	}
 
 	tlsfingerprint.SetMode(serverCfg.TLSFingerprint)
@@ -221,6 +231,7 @@ func main() {
 		}
 		accounts.GlobalSelector().SaveAffinity(affinityPath)
 		requestlog.Close()
+		toolsig.ClosePersistence()
 	}()
 
 	logx.LogGateway("[ClaudGravityNext] Listening on http://localhost:%d (plain API + dashboard)", serverCfg.Port)

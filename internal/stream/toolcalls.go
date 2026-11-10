@@ -99,7 +99,7 @@ func (f *FSM) HandleFunctionCall(name string, argsRaw string, thoughtSignature s
 		effectiveSig = f.lastTurnThoughtSignature
 	}
 	if effectiveSig == "" {
-		effectiveSig = toolsig.GetSessionSignature(f.cwdKey)
+		effectiveSig = toolsig.GetSessionSignature(f.cwdKey, f.resolvedModel)
 	}
 	if f.currentBlock == BlockThinking && f.thoughtSignature == "" && effectiveSig != "" {
 		f.thoughtSignature = effectiveSig
@@ -142,7 +142,7 @@ func (f *FSM) HandleFunctionCall(name string, argsRaw string, thoughtSignature s
 
 	callID := nextToolCallID(name)
 	f.toolCallIDs = append(f.toolCallIDs, callID)
-	setToolSignature(callID, effectiveSig)
+	setToolSignature(callID, effectiveSig, f.resolvedModel)
 
 	startPayload := map[string]interface{}{
 		"type":  "content_block_start",

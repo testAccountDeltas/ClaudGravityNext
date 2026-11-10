@@ -393,10 +393,10 @@ func TestConvertToolResultBlock_JSONResultIsRaw(t *testing.T) {
 func TestConvertThinkingBlock_OnlyLastAssistantTurnSurvives(t *testing.T) {
 	block := gjson.Parse(mustJSON(t, `{"type":"thinking","thinking":"reasoning...","signature":"sig1"}`))
 	content := gjson.Parse(`[]`)
-	if parts := convertThinkingBlock(block, "assistant", false, content, true, "sess1"); parts != nil {
+	if parts := convertThinkingBlock(block, "assistant", false, content, true, "sess1", ""); parts != nil {
 		t.Fatalf("an older (non-last) assistant turn's thinking must be dropped, got %v", parts)
 	}
-	parts := convertThinkingBlock(block, "assistant", true, content, true, "sess1")
+	parts := convertThinkingBlock(block, "assistant", true, content, true, "sess1", "")
 	if len(parts) != 1 || gjson.Get(parts[0], "thought").Bool() != true {
 		t.Fatalf("the last assistant turn's thinking must survive as thought:true, got %v", parts)
 	}
@@ -408,7 +408,7 @@ func TestConvertThinkingBlock_PublicAPIKeyModeDegradesToText(t *testing.T) {
 	// in its history — even on the last assistant turn, where Antigravity
 	// mode keeps it as a real thought part.
 	block := gjson.Parse(mustJSON(t, `{"type":"thinking","thinking":"reasoning...","signature":"sig1"}`))
-	parts := convertThinkingBlock(block, "assistant", true, gjson.Parse(`[]`), false, "sess1")
+	parts := convertThinkingBlock(block, "assistant", true, gjson.Parse(`[]`), false, "sess1", "")
 	if len(parts) != 1 || gjson.Get(parts[0], "thought").Exists() {
 		t.Fatalf("on the public API, thinking must degrade to plain text even on the last assistant turn, got %v", parts)
 	}
@@ -419,7 +419,7 @@ func TestConvertThinkingBlock_PublicAPIKeyModeDegradesToText(t *testing.T) {
 
 func TestConvertThinkingBlock_RoleInversionDegradesToText(t *testing.T) {
 	block := gjson.Parse(mustJSON(t, `{"type":"thinking","thinking":"reasoning..."}`))
-	parts := convertThinkingBlock(block, "user", true, gjson.Parse(`[]`), true, "sess1")
+	parts := convertThinkingBlock(block, "user", true, gjson.Parse(`[]`), true, "sess1", "")
 	if gjson.Get(parts[0], "thought").Exists() {
 		t.Fatalf("a thinking block in a user turn must degrade to plain text")
 	}
@@ -428,8 +428,8 @@ func TestConvertThinkingBlock_RoleInversionDegradesToText(t *testing.T) {
 func TestConvertThinkingBlock_RecoversSignatureFromSiblingToolUse(t *testing.T) {
 	block := gjson.Parse(mustJSON(t, `{"type":"thinking","thinking":"reasoning...","signature":"skip_thought_signature_validator"}`))
 	content := gjson.Parse(mustJSON(t, `[{"type":"tool_use","id":"toolu_sig_test_1"}]`))
-	toolsig.Set("toolu_sig_test_1", "real-signature")
-	parts := convertThinkingBlock(block, "assistant", true, content, true, "sess1")
+	toolsig.Set("toolu_sig_test_1", "real-signature", "")
+	parts := convertThinkingBlock(block, "assistant", true, content, true, "sess1", "")
 	if gjson.Get(parts[0], "thoughtSignature").String() != "real-signature" {
 		t.Fatalf("expected the sibling tool_use's cached real signature, got %v", parts)
 	}
@@ -438,8 +438,8 @@ func TestConvertThinkingBlock_RecoversSignatureFromSiblingToolUse(t *testing.T) 
 func TestConvertThinkingBlock_RecoversSignatureFromSessionFallback(t *testing.T) {
 	block := gjson.Parse(mustJSON(t, `{"type":"thinking","thinking":"reasoning...","signature":"skip_thought_signature_validator"}`))
 	content := gjson.Parse(mustJSON(t, `[{"type":"tool_use","id":"toolu_no_sig"}]`))
-	toolsig.SetSessionSignature("sess_fallback_1", "session-real-sig")
-	parts := convertThinkingBlock(block, "assistant", true, content, true, "sess_fallback_1")
+	toolsig.SetSessionSignature("sess_fallback_1", "session-real-sig", "")
+	parts := convertThinkingBlock(block, "assistant", true, content, true, "sess_fallback_1", "")
 	if len(parts) == 0 || gjson.Get(parts[0], "thoughtSignature").String() != "session-real-sig" {
 		t.Fatalf("expected session-level fallback signature, got %v", parts)
 	}
@@ -874,7 +874,7 @@ func TestTranslateMessages_MultimodalOrder_ImageAndText(t *testing.T) {
 			}
 		]
 	}`)
-	out := translateMessages("{}", root, toolNameInfo{}, true, "session1")
+	out := translateMessages("{}", root, toolNameInfo{}, true, "session1", "")
 	parts := gjson.Get(out, "contents.0.parts").Array()
 	if len(parts) != 2 {
 		t.Fatalf("expected 2 parts, got %d (full: %s)", len(parts), out)

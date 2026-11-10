@@ -67,7 +67,7 @@ func TestOrdering_ParallelToolCalls_InheritTheTurnSignature(t *testing.T) {
 		t.Fatal("tool_use ids must be unique")
 	}
 	for _, id := range ids {
-		if got := getToolSignature(id); got != "sig-turn-1" {
+		if got := getToolSignature(id, ""); got != "sig-turn-1" {
 			t.Fatalf("tool %s signature = %q, want the turn's sig-turn-1", id, got)
 		}
 	}

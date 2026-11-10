@@ -8,8 +8,10 @@
 #   $env:CLAUDGRAVITY_KEY = "sk-..."
 #   irm https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.ps1 | iex
 #
-# Optional proxy mode (gateway answers Claude Code's own api.anthropic.com calls, e.g. /usage):
-#   $env:CLAUDGRAVITY_PROXY = "1"   before the one-liner (or run the saved file with -Proxy)
+# Proxy mode (the gateway answers Claude Code's own api.anthropic.com calls, e.g. /usage)
+# is tried automatically and skipped with a warning if the gateway cannot provide it:
+#   $env:CLAUDGRAVITY_PROXY = "1"   require it (or run the saved file with -Proxy)
+#   $env:CLAUDGRAVITY_PROXY = "0"   skip it    (or -NoProxy)
 #
 # Uninstall (download first -- piped iex can't take switches):
 #   irm https://raw.githubusercontent.com/testAccountDeltas/ClaudGravityNext/main/install.ps1 -OutFile install.ps1
@@ -26,11 +28,17 @@
 
 $IsUninstall = ($env:CLAUDGRAVITY_UNINSTALL -eq "1") -or ($args -contains "-Uninstall")
 
-# Optional proxy mode: route Claude Code's own api.anthropic.com calls (the
-# /usage panel, bootstrap, ...) through the gateway's CONNECT proxy so the
-# gateway answers them instead of Anthropic. Needs the gateway's CONNECT port
-# (API port + 1) reachable. Enable with $env:CLAUDGRAVITY_PROXY = "1" or -Proxy.
-$UseProxy = ($env:CLAUDGRAVITY_PROXY -eq "1") -or ($args -contains "-Proxy")
+# Proxy mode: route Claude Code's own api.anthropic.com calls (the /usage
+# panel, bootstrap, ...) through the gateway's CONNECT proxy so the gateway
+# answers them instead of Anthropic. Needs the gateway's CONNECT port (API
+# port + 1) reachable. Default "auto": try it, and fall back to plain HTTP with
+# a warning if the gateway cannot provide it. "on" (-Proxy or
+# $env:CLAUDGRAVITY_PROXY = "1") fails instead of falling back; "off"
+# (-NoProxy or $env:CLAUDGRAVITY_PROXY = "0") skips it.
+$ProxyMode = "auto"
+if (($env:CLAUDGRAVITY_PROXY -eq "1") -or ($args -contains "-Proxy")) { $ProxyMode = "on" }
+if (($env:CLAUDGRAVITY_PROXY -eq "0") -or ($args -contains "-NoProxy")) { $ProxyMode = "off" }
+$UseProxy = $false
 
 $ErrorActionPreference = "Stop"
 $InstallDir = Join-Path $env:LOCALAPPDATA "ClaudGravityNext"
@@ -94,38 +102,45 @@ try {
     } else {
         Write-Host "Could not reach the gateway at $BaseUrl. Check the address, port and firewall: $_" -ForegroundColor Red
     }
-    exit 1
+    # throw, not exit: under "irm | iex" an exit would close the user's PowerShell window
+    throw "Installation aborted (see the message above)."
 }
 Write-Ok "OK -- gateway reachable, key accepted"
 
 # --- 1b. proxy mode: fetch the CA, proxy secret and CONNECT port ---
 $ProxyUrl = ""
 $CaPath = ""
-if ($UseProxy) {
+if ($ProxyMode -ne "off") {
     Write-Step "Proxy mode: reading the gateway's proxy settings"
     try {
-        $boot = Invoke-RestMethod -Uri "$BaseUrl/api/bootstrap" -Headers @{ "Authorization" = "Bearer $ApiKey" } -Method Get -TimeoutSec 10
+        try {
+            $boot = Invoke-RestMethod -Uri "$BaseUrl/api/bootstrap" -Headers @{ "Authorization" = "Bearer $ApiKey" } -Method Get -TimeoutSec 10
+        } catch {
+            throw "could not read $BaseUrl/api/bootstrap ($($_.Exception.Message))"
+        }
+        if (-not $boot.proxy_secret -or -not $boot.ca_pem -or -not $boot.connect_port) {
+            throw "the gateway did not return a proxy secret, CA and CONNECT port (is proxy_secret set in its config.json?)"
+        }
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        try {
+            $iar = $tcp.BeginConnect($GatewayHost, [int]$boot.connect_port, $null, $null)
+            if (-not $iar.AsyncWaitHandle.WaitOne(5000) -or -not $tcp.Connected) {
+                throw "the CONNECT proxy port $GatewayHost`:$($boot.connect_port) is not reachable (open it in the firewall: it is the API port + 1)"
+            }
+        } finally {
+            $tcp.Close()
+        }
+        $secretEnc = [uri]::EscapeDataString([string]$boot.proxy_secret)
+        $ProxyUrl = "http://$secretEnc`:x@$GatewayHost`:$($boot.connect_port)"
+        $UseProxy = $true
+        Write-Ok "CONNECT proxy reachable on port $($boot.connect_port)"
     } catch {
-        Write-Host "Could not read $BaseUrl/api/bootstrap: $_" -ForegroundColor Red
-        exit 1
+        if ($ProxyMode -eq "on") {
+            Write-Host "Proxy mode was requested but is not available: $_" -ForegroundColor Red
+            throw "Installation aborted (see the message above)."
+        }
+        Write-Warn "Proxy mode is not available ($_). Continuing with plain HTTP: everything works except the per-model line in /usage."
     }
-    if (-not $boot.proxy_secret -or -not $boot.ca_pem -or -not $boot.connect_port) {
-        Write-Host "The gateway did not return a proxy secret, CA and CONNECT port. Is proxy_secret set in its config.json?" -ForegroundColor Red
-        exit 1
-    }
-    $tcp = New-Object System.Net.Sockets.TcpClient
-    try {
-        $iar = $tcp.BeginConnect($GatewayHost, [int]$boot.connect_port, $null, $null)
-        if (-not $iar.AsyncWaitHandle.WaitOne(5000) -or -not $tcp.Connected) { throw "timed out" }
-    } catch {
-        Write-Host "The CONNECT proxy port $GatewayHost`:$($boot.connect_port) is not reachable. Open it in the firewall (it is the API port + 1), or install without -Proxy." -ForegroundColor Red
-        exit 1
-    } finally {
-        $tcp.Close()
-    }
-    $secretEnc = [uri]::EscapeDataString([string]$boot.proxy_secret)
-    $ProxyUrl = "http://$secretEnc`:x@$GatewayHost`:$($boot.connect_port)"
-    Write-Ok "CONNECT proxy reachable on port $($boot.connect_port)"
 }
 
 # --- 2. save local files ---

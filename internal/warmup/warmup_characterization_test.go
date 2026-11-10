@@ -72,8 +72,14 @@ func TestWrapAntigravityPayload_StructureAndDefaults(t *testing.T) {
 	if v["model"] != "gemini-2.5-flash" {
 		t.Fatalf("model must be preserved, got %v", v["model"])
 	}
-	if v["userAgent"] != "antigravity" || v["requestType"] != "agent" {
+	if v["userAgent"] != "antigravity" {
 		t.Fatalf("fixed envelope fields changed from v1: %+v", v)
+	}
+	// requestType must be absent, not "agent" — see payload.go's comment:
+	// the real client omits it, and "agent" was found to trigger a false
+	// 429 RESOURCE_EXHAUSTED bucket on Google's side.
+	if _, exists := v["requestType"]; exists {
+		t.Fatalf("requestType must be omitted, got %v", v["requestType"])
 	}
 	reqID, _ := v["requestId"].(string)
 	if len(reqID) < len("agent-") || reqID[:6] != "agent-" {

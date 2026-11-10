@@ -15,7 +15,7 @@ import (
 
 // translateMessages appends root's "messages" onto out's "contents"
 // array, in Gemini's Content{Role,Parts} shape.
-func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigravity bool, sessionID string) string {
+func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigravity bool, sessionID, targetModel string) string {
 	toolIDToName := make(map[string]string)
 	messages := root.Get("messages")
 	if !messages.IsArray() {
@@ -85,7 +85,7 @@ func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigra
 				case "image", "document":
 					partsJSON = append(partsJSON, convertImageDocumentBlock(ptype, p, role)...)
 				case "tool_use":
-					partsJSON = append(partsJSON, convertToolUseBlock(p, role, tn, isAntigravity, content, sessionID)...)
+					partsJSON = append(partsJSON, convertToolUseBlock(p, role, tn, isAntigravity, content, sessionID, targetModel)...)
 				case "server_tool_use":
 					// In a MODEL turn this is a call real Claude made (the
 					// conversation was moved to Gemini). A bracketed
@@ -101,7 +101,7 @@ func translateMessages(out string, root gjson.Result, tn toolNameInfo, isAntigra
 						partsJSON = append(partsJSON, convertWebSearchToolResultBlock(p)...)
 					}
 				case "thinking":
-					partsJSON = append(partsJSON, convertThinkingBlock(p, role, isLastAssistantMsg, content, isAntigravity, sessionID)...)
+					partsJSON = append(partsJSON, convertThinkingBlock(p, role, isLastAssistantMsg, content, isAntigravity, sessionID, targetModel)...)
 				case "redacted_thinking":
 					partsJSON = append(partsJSON, convertRedactedThinkingBlock(role, isLastAssistantMsg, isAntigravity)...)
 				default:

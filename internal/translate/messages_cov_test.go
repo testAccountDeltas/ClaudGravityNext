@@ -9,7 +9,7 @@ import (
 
 func covTranslate(body string, tn toolNameInfo, antigravity bool) string {
 	root := gjson.Parse(body)
-	return translateMessages(`{"contents":[]}`, root, tn, antigravity, "cov-sess")
+	return translateMessages(`{"contents":[]}`, root, tn, antigravity, "cov-sess", "")
 }
 
 func covTN(names ...string) toolNameInfo {

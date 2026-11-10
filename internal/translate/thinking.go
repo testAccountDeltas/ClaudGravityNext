@@ -23,7 +23,7 @@ import (
 // its own tool_use id, recovering it even when the live stream already
 // closed this thinking block with the skip-validator placeholder before
 // that functionCall's real signature arrived.
-func convertThinkingBlock(p gjson.Result, role string, isLastAssistantMsg bool, content gjson.Result, isAntigravity bool, sessionID string) []string {
+func convertThinkingBlock(p gjson.Result, role string, isLastAssistantMsg bool, content gjson.Result, isAntigravity bool, sessionID, targetModel string) []string {
 	thoughtTxt := p.Get("thinking").String()
 	if thoughtTxt == "" {
 		return nil
@@ -102,7 +102,7 @@ func convertThinkingBlock(p gjson.Result, role string, isLastAssistantMsg bool, 
 			if sibType != "tool_use" && sibType != "server_tool_use" {
 				return true
 			}
-			if real := toolsig.Get(sibling.Get("id").String()); real != "" {
+			if real := toolsig.Get(sibling.Get("id").String(), targetModel); real != "" {
 				sig = real
 				return false
 			}
@@ -113,7 +113,7 @@ func convertThinkingBlock(p gjson.Result, role string, isLastAssistantMsg bool, 
 		// "last real signature seen" fallback before giving up to the
 		// skip-validator placeholder.
 		if sig == "" {
-			sig = toolsig.GetSessionSignature(sessionID)
+			sig = toolsig.GetSessionSignature(sessionID, targetModel)
 		}
 		if sig == "" {
 			sig = "skip_thought_signature_validator"

@@ -31,6 +31,27 @@ var builtOnAnthropicRe = regexp.MustCompile(`(?i)\s*built on anthropic(['’]s)?
 var claudeAgentSDKRe = regexp.MustCompile(`(?i)claude agent sdk`)
 var strayPossessiveAssistantRe = regexp.MustCompile(`(?i)['’]s\s+(a\s+)?coding assistant`)
 
+// safetyBlockMarkers are substrings unique to Claude Code's client-injected
+// safety system block. If ALL markers appear in a single system block's text,
+// the entire block is dropped — this is the "Refuse requests for destructive
+// techniques" paragraph that only exists in the client, not in the model.
+var safetyBlockMarkers = []string{
+	"Refuse requests for destructive techniques",
+	"detection evasion for malicious purposes",
+}
+
+// IsSafetyBlock reports whether txt is the Claude Code client-side safety
+// system block (the one containing refusal instructions for destructive
+// techniques, DoS, supply chain compromise, etc.).
+func IsSafetyBlock(txt string) bool {
+	for _, m := range safetyBlockMarkers {
+		if !strings.Contains(txt, m) {
+			return false
+		}
+	}
+	return true
+}
+
 // ScrubBillingHeader strips out fingerprint headers and billing marks that
 // trigger Google 429/Filter:
 //  1. x-anthropic-billing-header
@@ -38,7 +59,11 @@ var strayPossessiveAssistantRe = regexp.MustCompile(`(?i)['’]s\s+(a\s+)?coding
 //     CloudCode actively filters
 //  3. Environmental noise (gitStatus, Recent commits, fast mode tags) to
 //     reduce prompt tokens
+//  4. Client-injected safety system block (refusal instructions)
 func ScrubBillingHeader(txt string) string {
+	if IsSafetyBlock(txt) {
+		return ""
+	}
 	var cleanLines []string
 	skipSection := false
 	skipSectionLines := 0

@@ -56,15 +56,15 @@ func TestMarkHeadersAlreadySent_TerminateWritesSSEErrorNotHTTP(t *testing.T) {
 }
 
 func TestGetToolSignature_RoundTripAndUnknown(t *testing.T) {
-	setToolSignature("toolu_sig_rt", "sig-xyz")
-	t.Cleanup(func() { setToolSignature("toolu_sig_rt", "") })
-	if got := getToolSignature("toolu_sig_rt"); got != "sig-xyz" {
+	setToolSignature("toolu_sig_rt", "sig-xyz", "")
+	t.Cleanup(func() { setToolSignature("toolu_sig_rt", "", "") })
+	if got := getToolSignature("toolu_sig_rt", ""); got != "sig-xyz" {
 		t.Fatalf("got %q", got)
 	}
-	if got := getToolSignature("toolu_never_set"); got != "" {
+	if got := getToolSignature("toolu_never_set", ""); got != "" {
 		t.Fatalf("unknown id must be empty, got %q", got)
 	}
-	if toolsig.Get("toolu_sig_rt") != "sig-xyz" {
+	if toolsig.Get("toolu_sig_rt", "") != "sig-xyz" {
 		t.Fatal("must share toolsig's store with the translate replay path")
 	}
 }

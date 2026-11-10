@@ -56,9 +56,16 @@ func TestUpstreamIdentity_GenerationCallLooksLikeTheAntigravityClient(t *testing
 		if gjson.Get(body, "request.system_instruction").Exists() || gjson.Get(body, "request.systemInstruction.parts.0.text").String() == "" {
 			t.Errorf("stream=%v: the system instruction must be spelled systemInstruction on the wire: %.300s", streaming, body)
 		}
-		if gjson.Get(body, "userAgent").String() != "antigravity" || gjson.Get(body, "requestType").String() != "agent" ||
+		if gjson.Get(body, "userAgent").String() != "antigravity" ||
 			!strings.HasPrefix(gjson.Get(body, "requestId").String(), "agent-") || gjson.Get(body, "request.sessionId").String() == "" {
 			t.Errorf("stream=%v: the Antigravity envelope is incomplete: %.200s", streaming, body)
+		}
+		// requestType must be ABSENT (not "agent"): the real Antigravity IDE
+		// client omits it on this path, and sending "agent" was found to
+		// make Google bucket the request into a detail-free 429
+		// RESOURCE_EXHAUSTED even with quota available.
+		if gjson.Get(body, "requestType").Exists() {
+			t.Errorf("stream=%v: requestType must be omitted, got %q", streaming, gjson.Get(body, "requestType").String())
 		}
 	}
 }

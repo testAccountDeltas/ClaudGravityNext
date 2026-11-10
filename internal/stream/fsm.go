@@ -28,13 +28,6 @@ const (
 	BlockToolUse
 )
 
-// GroundingSource is one Google Search result surfaced via Gemini's
-// native grounding, appended as a footer once generation finishes.
-type GroundingSource struct {
-	Title string `json:"title"`
-	URI   string `json:"uri"`
-}
-
 // FSM drives one request's Gemini-chunks-to-Claude-SSE-events state
 // machine.
 type FSM struct {
@@ -52,6 +45,12 @@ type FSM struct {
 
 	messageID string
 	model     string
+	// resolvedModel is st.ResolvedModelName — the real upstream target
+	// ("gemini-3.8-flash-tiered"/"claude-sonnet-4-6"), unlike model/
+	// p.ModelName which is always what the client asked for. Passed to
+	// toolsig so a signature isn't replayed across the Gemini/native-Claude
+	// family boundary a model_overrides remap can cross mid-session.
+	resolvedModel string
 
 	contextManagement map[string]interface{} // context_management.applied_edits for message_delta, nil if not requested
 
@@ -154,6 +153,7 @@ func NewFSM(writer *SafeSSEWriter, rid uint64, p *reqctx.Params, st *reqctx.Stat
 		rid:                    rid,
 		messageID:              fmt.Sprintf("msg_%d", time.Now().UnixNano()),
 		model:                  p.ModelName,
+		resolvedModel:          st.ResolvedModelName,
 		currentIndex:           -1,
 		sessionID:              p.SessionID,
 		cwdKey:                 cwdKey,
@@ -202,14 +202,14 @@ func (f *FSM) closeCurrentBlock() error {
 		// has no id for internal/translate's replay-side fallback to
 		// recover a real signature by.
 		if sig == "" || sig == "skip_thought_signature_validator" {
-			if cached := toolsig.GetSessionSignature(f.cwdKey); cached != "" && cached != "skip_thought_signature_validator" {
+			if cached := toolsig.GetSessionSignature(f.cwdKey, f.resolvedModel); cached != "" && cached != "skip_thought_signature_validator" {
 				sig = cached
 			}
 		}
 		if sig == "" {
 			sig = "skip_thought_signature_validator"
 		} else {
-			toolsig.SetSessionSignature(f.cwdKey, sig)
+			toolsig.SetSessionSignature(f.cwdKey, sig, f.resolvedModel)
 			f.lastTurnThoughtSignature = sig
 		}
 

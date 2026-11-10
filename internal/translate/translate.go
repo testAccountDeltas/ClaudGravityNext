@@ -322,7 +322,7 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 	if instanceID != "" {
 		translateSessionKey = sessionID + ":" + instanceID
 	}
-	out = translateMessages(out, root, tn, isAntigravity, translateSessionKey)
+	out = translateMessages(out, root, tn, isAntigravity, translateSessionKey, modelName)
 
 	// 6. Tools Declaration.
 	out, syntheticReasonTools, reverseToolNameMap := applyToolsDeclaration(out, root, tenant, tn, sessionID)

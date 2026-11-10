@@ -268,14 +268,13 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 
 	out, _ = sjson.Set(out, "generationConfig.maxOutputTokens", requestedMax)
 
-	// The Antigravity client sends no safetySettings at all, and a third-party
-	// client that disables every category stands out (the reference relay
-	// deletes the field as well). Only the public Gemini API path sets them.
 	if isAntigravity {
 		return out, budget
 	}
 
-	// Safety settings for the public Gemini Developer API.
+	// Safety settings: BLOCK_NONE on all categories for the public Gemini
+	// Developer API path only — CloudCode/Antigravity ignores client-side
+	// safetySettings and returns early above.
 	safetyCategories := []string{
 		"HARM_CATEGORY_HARASSMENT",
 		"HARM_CATEGORY_HATE_SPEECH",
@@ -285,11 +284,7 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 	}
 	for i, cat := range safetyCategories {
 		out, _ = sjson.Set(out, fmt.Sprintf("safetySettings.%d.category", i), cat)
-		threshold := "OFF"
-		if !isAntigravity || cat == "HARM_CATEGORY_CIVIC_INTEGRITY" {
-			threshold = "BLOCK_NONE"
-		}
-		out, _ = sjson.Set(out, fmt.Sprintf("safetySettings.%d.threshold", i), threshold)
+		out, _ = sjson.Set(out, fmt.Sprintf("safetySettings.%d.threshold", i), "BLOCK_NONE")
 	}
 
 	return out, budget

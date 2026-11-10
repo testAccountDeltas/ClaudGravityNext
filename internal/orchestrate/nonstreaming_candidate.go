@@ -45,7 +45,7 @@ type candidateResult struct {
 // claudeResp["content"] in place, and returns the bookkeeping
 // candidateResult needs. cand may be the zero gjson.Result (no
 // candidate at all — a genuinely empty response).
-func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string]interface{}, claudeBodyBytes []byte, req claude.Request, cwdKey string) candidateResult {
+func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string]interface{}, claudeBodyBytes []byte, req claude.Request, cwdKey, resolvedModel string) candidateResult {
 	var cr candidateResult
 	var lastTurnThoughtSig string
 	if !cand.Exists() {
@@ -91,10 +91,10 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 					sig = lastTurnThoughtSig
 				}
 				if sig == "" {
-					sig = toolsig.GetSessionSignature(cwdKey)
+					sig = toolsig.GetSessionSignature(cwdKey, resolvedModel)
 				}
 				if sig != "" {
-					toolsig.SetSessionSignature(cwdKey, sig)
+					toolsig.SetSessionSignature(cwdKey, sig, resolvedModel)
 				}
 				appendThinkingBlock(claudeResp, t, sig)
 
@@ -179,9 +179,9 @@ func processCandidate(p *reqctx.Params, cand gjson.Result, claudeResp map[string
 					callSig = lastTurnThoughtSig
 				}
 				if callSig == "" {
-					callSig = toolsig.GetSessionSignature(cwdKey)
+					callSig = toolsig.GetSessionSignature(cwdKey, resolvedModel)
 				}
-				toolsig.Set(callID, callSig)
+				toolsig.Set(callID, callSig, resolvedModel)
 				claudeResp["content"] = append(claudeResp["content"].([]map[string]interface{}), map[string]interface{}{
 					"type":  "tool_use",
 					"id":    callID,
