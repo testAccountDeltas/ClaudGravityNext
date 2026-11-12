@@ -88,7 +88,7 @@ writes):
 | `CLAUDE_CODE_GATEWAY_HINT_HEADERS` | `1` | Claude Code labels each request (main / subagent / helper). Without it every helper call (titles, summaries) is treated as heavy and can stall for 20-60 s. |
 | `CLAUDE_CODE_ATTRIBUTION_HEADER` | `0` | Drops the per-request attribution block, which would change the prompt prefix and break caching. |
 | `CLAUDE_CODE_ENABLE_TODO_TOOLS` | `1` | Keeps the todo tools available. |
-| `CLAUDE_CODE_EFFORT_LEVEL` | `xhigh` | Default effort (`low` ... `max`), mapped to a thinking budget. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | *(not set)* | Optional. Leave it unset: when set, it overrides `/effort` in the client for the whole session. Without it you can switch effort (`low` ... `max`) with `/effort`, mapped to a thinking budget. |
 | `DISABLE_AUTOUPDATER` | `1` | The client must not replace itself with a build you did not test. |
 | `CLAUDE_CODE_USE_POWERSHELL_TOOL` | `1` (Windows with PowerShell only) | Shell tool selection on Windows. |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_SIMPLE` | **set to an empty value** (not just left out) | A leftover value would bypass the gateway, override the token, or switch the client into its reduced "simple" mode. |
@@ -111,7 +111,6 @@ export _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1
 export CLAUDE_CODE_GATEWAY_HINT_HEADERS=1
 export CLAUDE_CODE_ATTRIBUTION_HEADER=0
 export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
-export CLAUDE_CODE_EFFORT_LEVEL=xhigh
 export DISABLE_AUTOUPDATER=1
 export HTTP_PROXY="" HTTPS_PROXY="" ALL_PROXY=""
 export ANTHROPIC_AUTH_TOKEN="" ANTHROPIC_API_KEY="" CLAUDE_CODE_SIMPLE=""
@@ -141,7 +140,6 @@ set "CLAUDE_CODE_SIMPLE="
 set "CLAUDE_CODE_ENABLE_TODO_TOOLS=1"
 set "CLAUDE_CODE_USE_POWERSHELL_TOOL=1"
 set "CLAUDE_CODE_ATTRIBUTION_HEADER=0"
-set "CLAUDE_CODE_EFFORT_LEVEL=xhigh"
 set "CLAUDE_CODE_GATEWAY_HINT_HEADERS=1"
 set "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1"
 set "DISABLE_AUTOUPDATER=1"
