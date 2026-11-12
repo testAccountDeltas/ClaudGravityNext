@@ -93,6 +93,7 @@ func RegisterDashboardRoutes(mux *http.ServeMux, cfgMgr *config.ConfigManager) {
 	}))
 	mux.HandleFunc("/oauth/login", requireDashboardAuth(cfgMgr, handleOAuthLogin))
 	mux.HandleFunc("/oauth/callback", requireDashboardAuth(cfgMgr, handleOAuthCallback))
+	mux.HandleFunc("/oauth/paste", requireDashboardAuth(cfgMgr, handleOAuthPaste))
 
 	// /api/bootstrap is deliberately NOT behind requireDashboardAuth: the
 	// installer scripts (install.ps1/install.sh) only ever have the end
