@@ -79,7 +79,6 @@ var fallbackMaxTokens = map[string]int64{
 	"gemini-3.8-flash-low":    1048576,
 	"gemini-3.8-flash-medium": 1048576,
 	"gemini-3.8-flash-high":   1048576,
-	"gemini-4-argon":          2097152,
 	"gemini-2.5-flash":        1048576,
 	"gemini-2.5-pro":          2097152,
 	"gemini-2.5-flash-lite":   1048576,

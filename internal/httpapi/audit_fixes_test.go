@@ -91,26 +91,16 @@ func TestCommonAPIMiddleware_PreservesIncomingRequestID(t *testing.T) {
 	}
 }
 
-func TestHandleModelByID_Gemini4ArgonExists(t *testing.T) {
-	cm := newTestConfigManager(t, "sk-good")
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/v1/models/gemini-4-argon", nil)
-	r.Header.Set("x-api-key", "sk-good")
-	r.SetPathValue("id", "gemini-4-argon")
-	handleModelByID(cm, w, r)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if m["id"] != "gemini-4-argon" {
-		t.Errorf("id = %v, want gemini-4-argon", m["id"])
-	}
-	if m["max_input_tokens"] != float64(2097152) {
-		t.Errorf("max_input_tokens = %v, want 2097152", m["max_input_tokens"])
+// gemini-4-* ids are listed on Google's public deprecations page but are not
+// served through Cloud Code (Antigravity), so the model list must not
+// advertise them: a client picking one only gets a 404 from Google. (A direct
+// lookup of an unknown gemini-* id still resolves through lookupModel's
+// family fallback, by design.)
+func TestAllModels_DoesNotAdvertiseGemini4(t *testing.T) {
+	for _, m := range allModels() {
+		if id, _ := m["id"].(string); strings.HasPrefix(id, "gemini-4") {
+			t.Errorf("model list advertises %q, which Cloud Code does not serve", id)
+		}
 	}
 }
 

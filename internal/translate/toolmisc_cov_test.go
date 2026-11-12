@@ -125,7 +125,7 @@ func TestCovContextWindowCeilingAndOutputCeiling(t *testing.T) {
 	if got := ContextWindowCeiling("totally-unknown-model-xyz"); got != 1048576 {
 		t.Fatalf("unknown model ceiling = %d", got)
 	}
-	if got := resolveContextWindowCeiling("gemini-4-argon"); got != 2097152 {
+	if got := resolveContextWindowCeiling("gemini-2.5-pro"); got != 2097152 {
 		t.Fatalf("fallback ceiling = %d", got)
 	}
 	if got := outputCeiling(accounts.AvailableModelInfo{MaxOutput: 12345}, true); got != 12345 {
