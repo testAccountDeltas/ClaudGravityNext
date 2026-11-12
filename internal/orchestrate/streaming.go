@@ -320,7 +320,8 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 	fsm := stream.NewFSM(sw, p.RID, &fsmParams, st)
 	fsm.SetChunkRecorder(speccapture.Global())
 
-	err = stream.StreamGeminiToClaude(fsm, upResp.Body, wd.Touch)
+	probe := newFirstTokenProbe(st.ActiveAccount, attemptStart, wd.Touch)
+	err = stream.StreamGeminiToClaude(fsm, upResp.Body, probe.Activity)
 	turnErr := asTurnError(err)
 	if err != nil && !sw.IsReleased() {
 		// Nothing of this turn reached the client (events still held):
@@ -334,6 +335,7 @@ func runStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqctx.S
 			status = 499
 		case errors.Is(err, context.Canceled):
 			status = http.StatusGatewayTimeout // idle watchdog, not a client disconnect
+			probe.Timeout()
 		}
 		fs := fsm.Stats()
 		logx.LogGateway("[#%d] << turn failed before any content (retryable): finishReason=%q status=%d err=%v usage in=%d out=%d cache_read=%d",

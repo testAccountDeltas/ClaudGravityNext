@@ -157,7 +157,7 @@ func (as *AccountSelector) selectLocked(apiKey string, conversationKey string, t
 			entry := el.Value.(*affinityLRUEntry)
 			if now.Before(entry.expiresAt) {
 				for _, acc := range accountList {
-					if acc.Email == entry.email && !isExcluded(acc) && availableFor(acc, model) {
+					if acc.Email == entry.email && !isExcluded(acc) && availableFor(acc, model) && !shunned(acc, accountList, isExcluded, model) {
 						// Refresh lease and mark as most-recently-used.
 						entry.expiresAt = now.Add(sessionAffinityTTL)
 						as.affinityLRU.MoveToFront(el)
@@ -182,7 +182,7 @@ func (as *AccountSelector) selectLocked(apiKey string, conversationKey string, t
 				}
 			}
 			for _, acc := range accountList {
-				if acc.Email == assignedEmail && !isExcluded(acc) && availableFor(acc, model) {
+				if acc.Email == assignedEmail && !isExcluded(acc) && availableFor(acc, model) && !shunned(acc, accountList, isExcluded, model) {
 					// Bound sticky skew for new sessions (selector_spread.go).
 					if alt := as.spreadAlternativeLocked(acc, accountList, isExcluded, model); alt != nil {
 						as.setStickyLocked(apiKey, alt.Email)
@@ -227,7 +227,7 @@ func (as *AccountSelector) selectLocked(apiKey string, conversationKey string, t
 	var maxQuota float64 = -1.0
 
 	for _, acc := range accountList {
-		if isExcluded(acc) || !availableFor(acc, model) {
+		if isExcluded(acc) || !availableFor(acc, model) || shunned(acc, accountList, isExcluded, model) {
 			continue
 		}
 		q := getEffectiveQuotaFraction(acc)
