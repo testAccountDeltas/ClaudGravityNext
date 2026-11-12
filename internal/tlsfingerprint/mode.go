@@ -11,7 +11,6 @@
 package tlsfingerprint
 
 import (
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -53,7 +52,7 @@ func Mode() string {
 func newStandardTransport() http.RoundTripper {
 	tr := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: fingerprintDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+		DialContext:           dialIPv4,
 		ForceAttemptHTTP2:     true,
 		TLSHandshakeTimeout:   fingerprintDialTimeout,
 		IdleConnTimeout:       h2IdleConnTimeout,

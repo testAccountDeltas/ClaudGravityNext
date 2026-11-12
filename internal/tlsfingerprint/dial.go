@@ -88,7 +88,7 @@ func (t *fingerprintedRoundTripper) dialTLS(ctx context.Context, host, addr stri
 			}
 		}
 	} else {
-		rawConn, err = dialer.DialContext(ctx, "tcp", addr)
+		rawConn, err = dialer.DialContext(ctx, directNetwork, addr)
 		if err != nil {
 			return nil, err
 		}
