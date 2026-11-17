@@ -71,17 +71,21 @@ Write-Host ""
 Write-Step "Gateway settings"
 
 $GatewayUrl = $env:CLAUDGRAVITY_URL
-if (-not $GatewayUrl) {
+while (-not $GatewayUrl -or -not $GatewayUrl.Trim()) {
+    # Re-ask on an empty answer instead of continuing with an empty host.
     $GatewayUrl = Read-Host "Gateway address (e.g. 203.0.113.10 or 203.0.113.10:8898)"
 }
 $GatewayUrl = $GatewayUrl.Trim().TrimEnd('/')
 $GatewayUrl = $GatewayUrl -replace '^https?://', ''
 
 $ApiKey = $env:CLAUDGRAVITY_KEY
-if (-not $ApiKey) {
+while (-not $ApiKey -or -not $ApiKey.Trim()) {
     $ApiKey = Read-Host "API key (sk-...)"
 }
 $ApiKey = $ApiKey.Trim()
+if ($ApiKey -match '^\d{1,3}(\.\d{1,3}){3}(:\d+)?$') {
+    throw "The API key looks like an IP address ($ApiKey). Run the installer again: the first answer is the gateway address, the second is the key (sk-...)."
+}
 
 if ($GatewayUrl -notmatch ':\d+$') {
     $GatewayUrl = "$GatewayUrl`:8898"
