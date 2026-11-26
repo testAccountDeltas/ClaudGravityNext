@@ -27,6 +27,10 @@ Claude Code ──▶  ClaudGravityNext  ──▶  Gemini
 - **Effort levels.** `low`, `medium`, `high`, `xhigh`, `max` map to thinking budgets.
 - **Wire-compatible.** SSE grammar, usage numbers, stop reasons and error types follow the
   Anthropic API, so clients don't need special cases.
+- **Artifacts & Live Viewer.** In proxy mode, the gateway serves Claude Code's `Artifact`
+  backend locally (`artifacts.db`): HTML/DB artifacts, live auto-reload over WebSocket
+  (`frame-live.v1`) and browser SSE, viewer comments/replies, and automatic rewriting of
+  `claude.ai/code/artifact/<slug>` links to the gateway's own viewer URL (`/code/artifact/<slug>`).
 - **Dashboard.** Add accounts, create API keys, watch quotas and logs in the browser.
 - **Safe defaults.** Secrets are generated on first run, SSRF-guarded URL downloads, upstream
   error details are sanitized before they reach clients.
@@ -200,14 +204,18 @@ before piping it into a shell; uninstall with `bash install.sh --uninstall` or
 `.\install.ps1 -Uninstall`.
 
 **Proxy mode (automatic).** Claude Code asks `api.anthropic.com` directly for a few things
-that are not model calls, for example the per-model breakdown in `/usage`, which otherwise
-shows "Per-model breakdown unavailable (rate limited ...)". That address is hard-coded in the
-client, so the installer routes those calls through the gateway's CONNECT proxy: it reads
+that are not model calls — for example the per-model breakdown in `/usage` (which otherwise
+shows "Per-model breakdown unavailable (rate limited ...)") and the built-in `Artifact`
+Frame/Live API (`/api/frame/*`, `/edge-api/frame-live/*`). Those hosts are hard-coded in the
+client, so the installer routes them through the gateway's CONNECT proxy: it reads
 `/api/bootstrap` (key-protected) for the gateway's CA and proxy secret, saves the CA next to
 the launcher, and sets `HTTPS_PROXY` and `NODE_EXTRA_CA_CERTS`. This needs `proxy_secret` set
-in `config.json` and the CONNECT port (API port + 1) reachable from your machine. If the
-gateway cannot provide it, the installer says why and falls back to plain HTTP, where
-everything works except that one line of `/usage`.
+in `config.json` and the CONNECT port (API port + 1) reachable from your machine. When proxy
+mode is active, `Artifact` publishes HTML/DB pages locally into `artifacts.db`, rewrites
+`claude.ai/code/artifact/<slug>` links in model responses to `/code/artifact/<slug>`, and
+serves a browser viewer with live reload (SSE + `frame-live.v1` WebSocket) and comments. If
+the gateway cannot provide proxy mode, the installer says why and falls back to plain HTTP,
+where chat works normally without the direct `api.anthropic.com` endpoints.
 
 - `--proxy` (`$env:CLAUDGRAVITY_PROXY = "1"` or `-Proxy` in PowerShell): require proxy mode and
   stop with an error instead of falling back.
@@ -222,8 +230,9 @@ Everything lives in `config.json` (see `config.example.json`).
 
 | Setting (`server.`) | What it does |
 |---|---|
-| `port` | Plain HTTP API + dashboard. Keep `8898` for the Google login (see above). |
+| `port` | Plain HTTP API + dashboard + artifact viewer. Keep `8898` for the Google login (see above). |
 | `public_host` | Hostname/IP clients use to reach the gateway; added to the TLS certificate. |
+| `artifact_viewer_url` | Optional base URL used when rewriting `claude.ai/code/artifact/<slug>` links (auto-derived from request `Host` or `public_host` if empty). |
 | `model_overrides` | Opt-in: serve a Claude family (`sonnet`/`opus`/`haiku`) from a native model. |
 | `tls_fingerprint` | `go` (default) or `chrome`. |
 | `allow_history_truncation` | Drop the oldest turns instead of returning "prompt is too long". |
