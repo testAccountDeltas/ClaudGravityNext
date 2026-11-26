@@ -24,7 +24,11 @@ Claude Code ──▶  ClaudGravityNext  ──▶  Gemini
   long MCP tool names shortened and restored.
 - **Cache-friendly.** The request prefix is kept deterministic so prompt caching works, and
   `max_tokens: 0` pre-warms it.
-- **Effort levels.** `low`, `medium`, `high`, `xhigh`, `max` map to thinking budgets.
+- **Gemini 4 & dynamic tiering.** Flagship `opus` routes to `gemini-4-hydrogen-tiered-xhigh`
+  (`gemini-4-hydrogen` sub-tiers), `sonnet`/`fable`/`mythos` route to `gemini-3.8-flash`
+  sub-tiers, and `haiku` routes to `gemini-2.5-flash` (overridable via `model_overrides`).
+- **Effort levels.** `low`, `medium`, `high`, `xhigh`, `max` map to model sub-tiers and
+  thinking budgets (capped at `65535`, or `thinkingLevel` for direct Gemini 4 API calls).
 - **Wire-compatible.** SSE grammar, usage numbers, stop reasons and error types follow the
   Anthropic API, so clients don't need special cases.
 - **Artifacts & Live Viewer.** In proxy mode, the gateway serves Claude Code's `Artifact`
@@ -241,6 +245,26 @@ Everything lives in `config.json` (see `config.example.json`).
 Each entry under `tenants` is one API key: `default_model`, `strategy`
 (`sticky`, `round_robin`, `highest_quota`), `thinking_budget`, and so on. You can also create
 and delete keys from the dashboard.
+
+## Model routing & `/v1/models`
+
+Unless overridden by `server.model_overrides`, Claude model aliases and versioned IDs
+(including `claude-opus-4-*` / `5` / `5-5`, `claude-sonnet-*`, `claude-haiku-*`,
+`claude-fable-5*`, and `claude-mythos-5*`) map automatically to Gemini targets:
+
+| Claude family | Default Gemini target | Max output | Notes |
+|---|---|---|---|
+| `opus` | `gemini-4-hydrogen-tiered-xhigh` | 262,144 | Scales `gemini-4-hydrogen-{low,medium,high,tiered-xhigh}` with effort |
+| `fable`, `mythos` | `gemini-3.8-flash-tiered` | 64,000 | Scales `gemini-3.8-flash-{low,medium,high,tiered}` with effort |
+| `sonnet` | `gemini-3.8-flash-medium` | 64,000 | Scales `gemini-3.8-flash-{low,medium,high,tiered}` with effort |
+| `haiku` | `gemini-2.5-flash` | 64,000 | Thinking-free by default (`xhigh`/`max` opts in) |
+
+- `/v1/models` exposes the Claude alias catalog alongside live models discovered from the
+  backend (filtering out disabled and internal `-sonar` entries).
+- Effort levels `low` (2048), `medium` (8192), `high` (16384), `xhigh` (`ModeAuto`, `-1`),
+  and `max` (capped at Google's `65535` ceiling) adjust both the target sub-tier and thinking
+  configuration; direct Gemini Developer API calls (`gemini-4*` with an API key) translate
+  thinking to `thinkingLevel` (`low`/`medium`/`high`/`xhigh`) instead of `thinkingBudget`.
 
 ## Running on a server
 
