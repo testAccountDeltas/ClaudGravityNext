@@ -52,6 +52,7 @@ var knownModels = []map[string]interface{}{
 	{"id": "gemini-2.5-flash", "type": "model", "display_name": "Gemini 2.5 Flash", "created_at": "2025-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 64000, "capabilities": buildModelCapabilities(true, true)},
 	{"id": "gemini-2.5-pro", "type": "model", "display_name": "Gemini 2.5 Pro", "created_at": "2025-01-01T00:00:00Z", "max_input_tokens": 2097152, "max_tokens": 64000, "capabilities": buildModelCapabilities(true, true)},
 	{"id": "gemini-3.8-flash-tiered", "type": "model", "display_name": "Gemini 3.8 Flash Tiered", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 64000, "capabilities": buildModelCapabilities(true, true)},
+	{"id": "gemini-4-hydrogen-tiered-xhigh", "type": "model", "display_name": "Gemini 4 Hydrogen (XHigh Tiered)", "created_at": "2026-03-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 262144, "capabilities": buildModelCapabilities(true, true)},
 	{"id": "claude-3-haiku-20240307", "type": "model", "display_name": "Claude 3 Haiku", "created_at": "2024-03-07T00:00:00Z", "max_input_tokens": 200000, "max_tokens": 4096, "capabilities": buildModelCapabilities(false, true)},
 	{"id": "claude-3-5-haiku-20241022", "type": "model", "display_name": "Claude 3.5 Haiku", "created_at": "2024-10-22T00:00:00Z", "max_input_tokens": 200000, "max_tokens": 8192, "capabilities": buildModelCapabilities(false, true)},
 	{"id": "claude-3-5-haiku", "type": "model", "display_name": "Claude 3.5 Haiku", "created_at": "2024-10-22T00:00:00Z", "max_input_tokens": 200000, "max_tokens": 8192, "capabilities": buildModelCapabilities(false, true)},
@@ -86,8 +87,10 @@ var knownModels = []map[string]interface{}{
 	{"id": "claude-haiku-5-5", "type": "model", "display_name": "Claude Haiku 5.5", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 64000, "capabilities": buildModelCapabilities(true, true)},
 	{"id": "claude-fable-5", "type": "model", "display_name": "Claude Fable 5", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 128000, "capabilities": buildModelCapabilities(true, true)},
 	{"id": "claude-fable-5-1", "type": "model", "display_name": "Claude Fable 5.1", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 128000, "capabilities": buildModelCapabilities(true, true)},
+	{"id": "claude-fable-5-2", "type": "model", "display_name": "Claude Fable 5.2", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 128000, "capabilities": buildModelCapabilities(true, true)},
 	{"id": "claude-mythos-5", "type": "model", "display_name": "Claude Mythos 5", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 128000, "capabilities": buildModelCapabilities(true, true)},
 	{"id": "claude-mythos-5-1", "type": "model", "display_name": "Claude Mythos 5.1", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 128000, "capabilities": buildModelCapabilities(true, true)},
+	{"id": "claude-mythos-5-2", "type": "model", "display_name": "Claude Mythos 5.2", "created_at": "2026-01-01T00:00:00Z", "max_input_tokens": 1048576, "max_tokens": 128000, "capabilities": buildModelCapabilities(true, true)},
 	// Claude Code's Agent/Task tool can request a subagent model by its
 	// bare alias ("haiku", "sonnet", "opus", "fable", "mythos" — no
 	// "claude-" prefix; internal/accounts/tiering already maps these to a

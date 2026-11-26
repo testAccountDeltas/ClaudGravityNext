@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,6 +146,9 @@ func (am *AccountManager) FetchAvailableModels(forceRefresh bool) ([]AvailableMo
 	var result []AvailableModelInfo
 	modelsObj.ForEach(func(key, val gjson.Result) bool {
 		modelKey := key.String()
+		if val.Get("disabled").Bool() || strings.HasSuffix(modelKey, "-sonar") {
+			return true
+		}
 		disp := val.Get("displayName").String()
 		if disp == "" {
 			disp = modelKey

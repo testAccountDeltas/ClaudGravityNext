@@ -1,6 +1,6 @@
 // Part of the tlsfingerprint package. Everything this gateway sends to Google
-// claims to be one client: "vscode/1.X.X (Antigravity/<version>)", whose CloudCode
-// calls are made by a Go program (the language server). The matching TLS
+// claims to be one client: "antigravity/cli/<version>", whose CloudCode
+// calls are made by a Go program. The matching TLS
 // ClientHello is Go's own. The browser-shaped ClientHello of the fingerprinted
 // round tripper (uTLS Chrome) next to that User-Agent is a combination no real
 // client produces, and a ClientHello has to match the client the rest of the

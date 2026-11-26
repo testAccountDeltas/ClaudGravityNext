@@ -264,3 +264,32 @@ func TestWriteJSON_RequestIDPreservation(t *testing.T) {
 		t.Errorf("minted request-id = %q, want req_<hex>", rid)
 	}
 }
+
+func TestHandleEval_EnablesLiveArtifactFlags(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/eval/test-key", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	handleEval(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var payload struct {
+		Status   int `json:"status"`
+		Features map[string]struct {
+			DefaultValue bool `json:"defaultValue"`
+		} `json:"features"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode eval: %v", err)
+	}
+	for _, flag := range []string{
+		"tengu_slate_lantern",
+		"tengu_slate_lantern_ember",
+		"tengu_onyx_sluice",
+		"tengu_teal_corbel",
+		"tengu_sorrel_trellis",
+	} {
+		if !payload.Features[flag].DefaultValue {
+			t.Errorf("feature %s defaultValue = false, want true", flag)
+		}
+	}
+}

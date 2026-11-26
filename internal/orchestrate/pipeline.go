@@ -177,8 +177,12 @@ func (o *Orchestrator) execute(ctx context.Context, p *reqctx.Params, st *reqctx
 			}
 
 			if (baseModelName == "claude-sonnet-4-6" || baseModelName == "claude-opus-4-6-thinking" || baseModelName == "gpt-oss-120b-medium") && ratelimit.IsNative3PModelExhausted(attemptState.ActiveAccount) {
-				logx.LogGateway("[#%d] !! Native 3P model %s has exhausted quota on selected account %s, remapping to gemini-3.8-flash-tiered", p.RID, baseModelName, acc.Email)
-				attemptState.ResolvedModelName = "gemini-3.8-flash-tiered"
+				fallback := "gemini-3.8-flash-tiered"
+				if baseModelName == "claude-opus-4-6-thinking" {
+					fallback = "gemini-4-hydrogen-tiered-xhigh"
+				}
+				logx.LogGateway("[#%d] !! Native 3P model %s has exhausted quota on selected account %s, remapping to %s", p.RID, baseModelName, acc.Email, fallback)
+				attemptState.ResolvedModelName = fallback
 			}
 		}
 
@@ -190,6 +194,9 @@ func (o *Orchestrator) execute(ctx context.Context, p *reqctx.Params, st *reqctx
 				// internal aliases the public Gemini Developer API
 				// doesn't recognize.
 				modelName = "gemini-2.5-flash"
+				attemptState.ResolvedModelName = modelName
+			} else if strings.HasPrefix(modelName, "gemini-4-hydrogen") {
+				modelName = "gemini-4-hydrogen"
 				attemptState.ResolvedModelName = modelName
 			}
 			baseURL := p.Tenant.GoogleBaseURL
@@ -242,7 +249,7 @@ func (o *Orchestrator) execute(ctx context.Context, p *reqctx.Params, st *reqctx
 			if p.IsAntigravity {
 				finalPayload = warmup.WrapAntigravityPayload(attemptState.ResolvedModelName, st.GeminiBody, projectID, bump, antigravitySessionKey)
 			} else {
-				finalPayload = stripThoughtFieldsForPublicAPI(st.GeminiBody)
+				finalPayload = stripThoughtFieldsForPublicAPIModel(st.GeminiBody, attemptState.ResolvedModelName)
 			}
 
 			if len(finalPayload) > maxInlineDataBytes {

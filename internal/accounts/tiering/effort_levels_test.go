@@ -13,11 +13,20 @@ func TestResolveTieringAndEffort_EffortLevelsAreFixedBudgetsExceptXhigh(t *testi
 	}
 	cases := map[string]map[string]want{
 		"opus": {
-			"low":       {"gemini-3.8-flash-medium", 8192}, // flagship class never drops below medium
+			"low":       {"gemini-4-hydrogen-low", 2048},
+			"medium":    {"gemini-4-hydrogen-medium", 8192},
+			"high":      {"gemini-4-hydrogen-high", 16384},
+			"xhigh":     {"gemini-4-hydrogen-tiered-xhigh", -1},
+			"max":       {"gemini-4-hydrogen-tiered-xhigh", 65535},
+			"ultracode": {"gemini-4-hydrogen-tiered-xhigh", -1},
+			"":          {"gemini-4-hydrogen-tiered-xhigh", -1},
+		},
+		"claude-fable-5-2": {
+			"low":       {"gemini-3.8-flash-low", 2048},
 			"medium":    {"gemini-3.8-flash-medium", 8192},
 			"high":      {"gemini-3.8-flash-high", 16384},
 			"xhigh":     {"gemini-3.8-flash-tiered", -1},
-			"max":       {"gemini-3.8-flash-tiered", 65536},
+			"max":       {"gemini-3.8-flash-tiered", 65535},
 			"ultracode": {"gemini-3.8-flash-tiered", -1},
 			"":          {"gemini-3.8-flash-tiered", -1},
 		},
@@ -26,7 +35,7 @@ func TestResolveTieringAndEffort_EffortLevelsAreFixedBudgetsExceptXhigh(t *testi
 			"medium": {"gemini-3.8-flash-medium", 8192},
 			"high":   {"gemini-3.8-flash-high", 16384},
 			"xhigh":  {"gemini-3.8-flash-tiered", -1},
-			"max":    {"gemini-3.8-flash-tiered", 65536},
+			"max":    {"gemini-3.8-flash-tiered", 65535},
 			"":       {"gemini-3.8-flash-medium", 8192},
 		},
 	}

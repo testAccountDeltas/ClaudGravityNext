@@ -15,7 +15,7 @@ func TestFamilyOverride_SonnetToNative(t *testing.T) {
 		t.Fatalf("sonnet override not applied, got %s", m)
 	}
 	opus := map[string]interface{}{"model": "claude-opus-4-5"}
-	if m, _ := ResolveTieringAndEffort(opus, "main", ""); m != "gemini-3.8-flash-tiered" {
-		t.Fatalf("opus must stay on Gemini, got %s", m)
+	if m, _ := ResolveTieringAndEffort(opus, "main", ""); m != "gemini-4-hydrogen-tiered-xhigh" {
+		t.Fatalf("opus must stay on Gemini 4 Hydrogen, got %s", m)
 	}
 }

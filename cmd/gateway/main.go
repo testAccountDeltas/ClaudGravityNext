@@ -185,6 +185,7 @@ func main() {
 	interceptedMux.Handle("/count_tokens", router)
 	interceptedMux.Handle("/count_tokens/", router)
 	interceptedMux.HandleFunc("/", mitm.PassthroughToReal)
+	mountArtifacts(cfgMgr, topMux, interceptedMux)
 	var mitmHandler http.Handler = httpapi.RecoverMiddleware(interceptedMux)
 
 	srv := &http.Server{

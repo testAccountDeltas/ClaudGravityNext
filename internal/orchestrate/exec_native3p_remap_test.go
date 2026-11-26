@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	claudeEmpty = `{"groups":[{"displayName":"Claude and GPT","buckets":[{"bucketId":"b","window":"5h","remainingFraction":0.01}]}]}`
-	claudeFull  = `{"groups":[{"displayName":"Claude and GPT","buckets":[{"bucketId":"b","window":"5h","remainingFraction":0.9}]}]}`
-	sonnet46    = `{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`
+	claudeEmpty    = `{"groups":[{"displayName":"Claude and GPT","buckets":[{"bucketId":"b","window":"5h","remainingFraction":0.01}]}]}`
+	claudeFull     = `{"groups":[{"displayName":"Claude and GPT","buckets":[{"bucketId":"b","window":"5h","remainingFraction":0.9}]}]}`
+	sonnet46       = `{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`
+	opus46Thinking = `{"model":"claude-opus-4-6-thinking","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`
 )
 
 // withQuota gives every seeded account the quota summary Google would report.
@@ -30,7 +31,7 @@ func withQuota(t *testing.T, summary string) func() {
 }
 
 func upstreamModelOf(body string) string {
-	for _, m := range []string{"gemini-3.8-flash-tiered", "claude-sonnet-4-6"} {
+	for _, m := range []string{"gemini-4-hydrogen-tiered-xhigh", "gemini-3.8-flash-tiered", "claude-sonnet-4-6", "claude-opus-4-6-thinking"} {
 		if strings.Contains(body, `"model":"`+m+`"`) {
 			return m
 		}
@@ -64,5 +65,41 @@ func TestPipeline_NativeClaudeWithQuotaKeepsItsModel(t *testing.T) {
 	}
 	if got := upstreamModelOf(r.bodies[0]); got != "claude-sonnet-4-6" {
 		t.Fatalf("upstream model = %s, want the native Claude model\n%.300s", got, r.bodies[0])
+	}
+}
+
+func TestPipeline_ExhaustedNativeOpusThinkingIsRemappedToHydrogen(t *testing.T) {
+	r := runExec(t, execOpts{nAcc: 1, streaming: true, claude: opus46Thinking, afterSeed: withQuota(t, claudeEmpty),
+		up: func(int, *http.Request, string) (*http.Response, error) {
+			return respBody(200, tfSSE(tfWrap(tfGood))), nil
+		}})
+	if !r.ok || r.status != http.StatusOK || r.attempts != 1 {
+		t.Fatalf("ok=%v status=%d attempts=%d err=%v", r.ok, r.status, r.attempts, r.err)
+	}
+	if got := upstreamModelOf(r.bodies[0]); got != "gemini-4-hydrogen-tiered-xhigh" {
+		t.Fatalf("upstream model = %s, want gemini-4-hydrogen-tiered-xhigh\n%.300s", got, r.bodies[0])
+	}
+}
+
+func TestPipeline_PublicAPI_Gemini4NormalizesModelAndThinkingLevel(t *testing.T) {
+	var reqPath string
+	r := runExec(t, execOpts{
+		nAcc:      0,
+		direct:    true,
+		streaming: true,
+		claude:    `{"model":"claude-opus-4-6","max_tokens":128,"temperature":0.2,"thinking":{"type":"adaptive"},"output_config":{"effort":"high"},"messages":[{"role":"user","content":"hi"}]}`,
+		up: func(_ int, req *http.Request, _ string) (*http.Response, error) {
+			reqPath = req.URL.Path
+			return respBody(200, tfSSE(tfWrap(tfGood))), nil
+		},
+	})
+	if !r.ok || r.status != http.StatusOK {
+		t.Fatalf("ok=%v status=%d err=%v", r.ok, r.status, r.err)
+	}
+	if !strings.Contains(reqPath, "/models/gemini-4-hydrogen:") {
+		t.Fatalf("public API path = %q, want normalized /models/gemini-4-hydrogen:", reqPath)
+	}
+	if !strings.Contains(r.bodies[0], `"thinkingLevel":"high"`) || strings.Contains(r.bodies[0], `"thinkingBudget"`) || strings.Contains(r.bodies[0], `"temperature"`) {
+		t.Fatalf("unexpected public Gemini 4 payload: %s", r.bodies[0])
 	}
 }

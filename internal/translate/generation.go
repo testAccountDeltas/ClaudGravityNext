@@ -6,6 +6,7 @@ package translate
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -13,6 +14,36 @@ import (
 	"claudgravity/internal/accounts"
 	"claudgravity/internal/schema"
 )
+
+func isGemini4Model(modelName string) bool {
+	return strings.HasPrefix(strings.ToLower(modelName), "gemini-4")
+}
+
+func thinkingLevelForGemini4(modelName string, budget int) string {
+	if budget < 0 {
+		m := strings.ToLower(modelName)
+		switch {
+		case strings.HasSuffix(m, "-tiered-high"), strings.HasSuffix(m, "-high") && !strings.HasSuffix(m, "-xhigh"):
+			return "high"
+		case strings.HasSuffix(m, "-medium"):
+			return "medium"
+		case strings.HasSuffix(m, "-low"):
+			return "low"
+		default:
+			return "xhigh"
+		}
+	}
+	switch {
+	case budget <= 2048:
+		return "low"
+	case budget <= 8192:
+		return "medium"
+	case budget <= 16384:
+		return "high"
+	default:
+		return "xhigh"
+	}
+}
 
 // applyGenerationConfig fills out's generationConfig and safetySettings.
 // Returns the updated out and the possibly-adjusted thinking budget (v1
@@ -22,6 +53,7 @@ import (
 // picked).
 func applyGenerationConfig(out string, root gjson.Result, modelName string, budget int, isAntigravity bool) (string, int) {
 	modelMeta, hasMeta := accounts.ModelCatalog().GetModel(modelName)
+	publicGemini4 := !isAntigravity && isGemini4Model(modelName)
 
 	// GAP-P0-01/GAP-TL-01/GAP-TH-05: Gemini unconditionally rejects a
 	// request that combines forced function calling
@@ -68,6 +100,12 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 		if budget > 0 && hasMeta && modelMeta.MinThinkingBudget > 0 && budget < modelMeta.MinThinkingBudget {
 			budget = modelMeta.MinThinkingBudget
 		}
+		if !publicGemini4 && budget > 65535 {
+			// Upstream Google enforces thinking_budget in [-1, 65535]. High-output
+			// models like Gemini 4 Hydrogen (MaxOutput=262144) do not hit the
+			// ceiling clamp below, so enforce 65535 explicitly here.
+			budget = 65535
+		}
 		// GAP-TH-08: thinking.display=="omitted" asks for thinking to
 		// still run (influencing output quality/budget) but never be
 		// RETURNED to the client — distinct from budget==0 (thinking
@@ -90,7 +128,11 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 			includeThoughts = false
 		}
 		out, _ = sjson.Set(out, "generationConfig.thinkingConfig.includeThoughts", includeThoughts)
-		if budget < 0 {
+		if publicGemini4 {
+			// Public Gemini Developer API uses thinkingLevel (low/medium/high/xhigh)
+			// on Gemini 4 instead of thinkingBudget.
+			out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingLevel", thinkingLevelForGemini4(modelName, budget))
+		} else if budget < 0 {
 			if isAntigravity {
 				// -1 enables ModeAuto unbracketed — Antigravity/CloudCode
 				// only.
@@ -125,39 +167,39 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 	// cheapest/fastest model family that most needs it.
 	thinkingActive := !forcedAny && (!hasMeta || modelMeta.Thinking) && budget != 0
 
-	// Carry over sampling hyperparameters: previously dropped entirely,
-	// so a client asking for temperature:0 (deterministic code
-	// generation) silently got Gemini's own default (commonly ~1.0)
-	// instead.
-	if temp := root.Get("temperature"); temp.Exists() {
-		t := temp.Float()
-		if thinkingActive && t != 1.0 {
-			// Anthropic's own spec requires temperature == 1.0 whenever
-			// thinking is enabled (any other value is rejected outright
-			// on the real API) — passing a client's temperature:0 (the
-			// common default for deterministic code generation) straight
-			// through on top of a thinking budget measured live to
-			// degrade Gemini 2.5/3.8's reasoning into repetitive thought
-			// loops instead of erroring, a much harder failure to notice
-			// and debug.
-			t = 1.0
+	// Carry over sampling hyperparameters except on the public Gemini 4 API
+	// path where temperature/topP/topK overrides can trigger 400s.
+	if !publicGemini4 {
+		if temp := root.Get("temperature"); temp.Exists() {
+			t := temp.Float()
+			if thinkingActive && t != 1.0 {
+				// Anthropic's own spec requires temperature == 1.0 whenever
+				// thinking is enabled (any other value is rejected outright
+				// on the real API) — passing a client's temperature:0 (the
+				// common default for deterministic code generation) straight
+				// through on top of a thinking budget measured live to
+				// degrade Gemini 2.5/3.8's reasoning into repetitive thought
+				// loops instead of erroring, a much harder failure to notice
+				// and debug.
+				t = 1.0
+			}
+			out, _ = sjson.Set(out, "generationConfig.temperature", t)
 		}
-		out, _ = sjson.Set(out, "generationConfig.temperature", t)
-	}
-	if topP := root.Get("top_p"); topP.Exists() {
-		out, _ = sjson.Set(out, "generationConfig.topP", topP.Float())
-	}
-	if topK := root.Get("top_k"); topK.Exists() {
-		// GAP-T6 (partial, conservative): top_k<=0 is never a valid
-		// sampling value on any Gemini model generation — forwarding it
-		// verbatim earns an unconditional 400. The claimed upper bound
-		// (40) is model-dependent and NOT independently confirmed against
-		// this gateway's actual (newer, gemini-3.8-class) model family, so
-		// it's deliberately left unclamped here rather than risk silently
-		// degrading sampling diversity on a model that accepts a higher
-		// value just fine.
-		if tk := topK.Int(); tk > 0 {
-			out, _ = sjson.Set(out, "generationConfig.topK", tk)
+		if topP := root.Get("top_p"); topP.Exists() {
+			out, _ = sjson.Set(out, "generationConfig.topP", topP.Float())
+		}
+		if topK := root.Get("top_k"); topK.Exists() {
+			// GAP-T6 (partial, conservative): top_k<=0 is never a valid
+			// sampling value on any Gemini model generation — forwarding it
+			// verbatim earns an unconditional 400. The claimed upper bound
+			// (40) is model-dependent and NOT independently confirmed against
+			// this gateway's actual (newer, gemini-3.8-class) model family, so
+			// it's deliberately left unclamped here rather than risk silently
+			// degrading sampling diversity on a model that accepts a higher
+			// value just fine.
+			if tk := topK.Int(); tk > 0 {
+				out, _ = sjson.Set(out, "generationConfig.topK", tk)
+			}
 		}
 	}
 	// stop_sequences are deliberately NOT forwarded as
@@ -248,7 +290,11 @@ func applyGenerationConfig(out string, root gjson.Result, modelName string, budg
 			requestedMax = ceiling
 			if int64(budget) >= ceiling {
 				budget = int(ceiling) - 1024
-				out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingBudget", budget)
+				if publicGemini4 {
+					out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingLevel", thinkingLevelForGemini4(modelName, budget))
+				} else {
+					out, _ = sjson.Set(out, "generationConfig.thinkingConfig.thinkingBudget", budget)
+				}
 			}
 		}
 	}

@@ -323,6 +323,7 @@ func runNonStreamingAttempt(baseCtx context.Context, p *reqctx.Params, st *reqct
 		applyPrefillToResponse(claudeResp, p.PrefillText)
 	}
 	stripOscIgnoreTag(claudeResp)
+	rewriteArtifactURLsInResponse(claudeResp, p.ArtifactViewerURL)
 	applyPrewarmShape(claudeResp, p.RawClaudeBody)
 
 	outJSON, _ := json.Marshal(claudeResp)

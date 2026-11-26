@@ -91,6 +91,18 @@ func TestStripThoughtFieldsForPublicAPI_PinsNegativeThinkingBudget(t *testing.T)
 	}
 }
 
+func TestStripThoughtFieldsForPublicAPIModel_Gemini4UsesThinkingLevel(t *testing.T) {
+	body := []byte(`{"contents":[],"generationConfig":{"temperature":0.2,"topP":0.9,"topK":20,"thinkingConfig":{"thinkingBudget":-1,"includeThoughts":true}}}`)
+	out := stripThoughtFieldsForPublicAPIModel(body, "gemini-4-hydrogen")
+	s := string(out)
+	if strings.Contains(s, `"thinkingBudget"`) || strings.Contains(s, `"temperature"`) || strings.Contains(s, `"topP"`) || strings.Contains(s, `"topK"`) {
+		t.Fatalf("expected thinkingBudget and sampling overrides stripped for public Gemini 4, got: %s", s)
+	}
+	if !strings.Contains(s, `"thinkingLevel":"xhigh"`) {
+		t.Fatalf("expected thinkingLevel xhigh for public Gemini 4, got: %s", s)
+	}
+}
+
 func TestStripThoughtFieldsForPublicAPI_NoOpWithoutContents(t *testing.T) {
 	body := []byte(`{"generationConfig":{}}`)
 	out := stripThoughtFieldsForPublicAPI(body)

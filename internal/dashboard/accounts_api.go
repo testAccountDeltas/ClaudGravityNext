@@ -90,20 +90,3 @@ func handleAPIWarmup(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": msg})
 }
-
-// handleAPIWarmupAll warms up every non-disabled account whose Gemini weekly
-// window sits at 100% remaining (never activated) — the dashboard's single
-// "warm up stale accounts" button, replacing the old per-row warmup button.
-func handleAPIWarmupAll(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	warmed, errs := accounts.Manager().WarmupAllFreshAccounts(ctx)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"warmed":  warmed,
-		"errors":  errs,
-		"count":   len(warmed),
-	})
-}

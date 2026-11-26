@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/websocket"
 )
 
 func selfSignedCert(t *testing.T) tls.Certificate {
@@ -193,4 +195,49 @@ func TestIdleCopy_StopsWhenSourceCloses(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("idleCopy kept running after EOF")
 	}
+}
+
+func TestServeInterceptedTLS_WebSocketUpgradeAndBidirectionalFrames(t *testing.T) {
+	wsSrv := websocket.Server{
+		Handshake: func(cfg *websocket.Config, _ *http.Request) error {
+			cfg.Protocol = []string{"frame-live.v1"}
+			return nil
+		},
+		Handler: func(ws *websocket.Conn) {
+			var msg string
+			if err := websocket.Message.Receive(ws, &msg); err != nil {
+				return
+			}
+			_ = websocket.Message.Send(ws, "reply:"+msg)
+		},
+	}
+	cli, done := interceptPair(t, wsSrv)
+	if err := cli.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := websocket.NewConfig("wss://claude.ai/edge-api/frame-live/test/ws", "https://claude.ai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Protocol = []string{"frame-live.v1", "fl1_token"}
+	wsCli, err := websocket.NewClient(cfg, cli)
+	if err != nil {
+		t.Fatalf("websocket handshake over MITM TLS failed: %v", err)
+	}
+	defer wsCli.Close()
+	if got := wsCli.Config().Protocol; len(got) != 1 || got[0] != "frame-live.v1" {
+		t.Fatalf("selected subprotocol = %v, want [frame-live.v1]", got)
+	}
+	if err := websocket.Message.Send(wsCli, "ping"); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := websocket.Message.Receive(wsCli, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "reply:ping" {
+		t.Fatalf("ws reply = %q, want reply:ping", got)
+	}
+	wsCli.Close()
+	waitDone(t, done, "after websocket close")
 }

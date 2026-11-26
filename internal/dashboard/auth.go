@@ -20,6 +20,11 @@ import (
 // dashboard exposes tenant keys, account emails and request logs.
 // If the dashboard password is not configured (or whitespace-only), it
 // fails closed with 401 Unauthorized to prevent open dashboard access.
+// RequireAuth wraps handler behind the dashboard's HTTP Basic Auth check.
+func RequireAuth(cfgMgr *config.ConfigManager, next http.HandlerFunc) http.HandlerFunc {
+	return requireDashboardAuth(cfgMgr, next)
+}
+
 func requireDashboardAuth(cfgMgr *config.ConfigManager, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		want := ""

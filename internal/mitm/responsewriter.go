@@ -3,7 +3,9 @@
 package mitm
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -27,12 +29,14 @@ const mitmIdleDeadline = 10 * time.Minute
 type MitmResponseWriter struct {
 	mu          sync.Mutex
 	conn        net.Conn
+	reader      *bufio.Reader
 	header      http.Header
 	buf         bytes.Buffer
 	statusCode  int
 	wroteHeader bool
 	headersSent bool
 	chunked     bool
+	hijacked    bool
 	sentOffset  int
 	// writeErr is set the moment a real socket write to the client fails
 	// (client disconnected). A Round 15 audit caught this had no equivalent
@@ -43,8 +47,13 @@ type MitmResponseWriter struct {
 }
 
 func newMitmResponseWriter(conn net.Conn) *MitmResponseWriter {
+	return newMitmResponseWriterWithReader(conn, nil)
+}
+
+func newMitmResponseWriterWithReader(conn net.Conn, reader *bufio.Reader) *MitmResponseWriter {
 	return &MitmResponseWriter{
 		conn:       conn,
+		reader:     reader,
 		header:     make(http.Header),
 		statusCode: http.StatusOK,
 	}
@@ -57,6 +66,9 @@ func (w *MitmResponseWriter) Header() http.Header {
 func (w *MitmResponseWriter) Write(b []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.hijacked {
+		return 0, net.ErrClosed
+	}
 	// A Round 15 audit caught this never surfaced a prior socket-write
 	// failure — the handler (and the upstream-read loop feeding it, via
 	// SSEStreamer.SendRaw) had no way to learn the client was already
@@ -73,10 +85,40 @@ func (w *MitmResponseWriter) Write(b []byte) (int, error) {
 func (w *MitmResponseWriter) WriteHeader(statusCode int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.hijacked {
+		return
+	}
 	if !w.wroteHeader {
 		w.statusCode = statusCode
 		w.wroteHeader = true
 	}
+}
+
+// Hijack implements http.Hijacker so handlers inside serveInterceptedTLS can
+// upgrade HTTP/1.1 connections (for example WebSockets on /edge-api/frame-live/*).
+func (w *MitmResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.hijacked {
+		return nil, nil, errors.New("connection already hijacked")
+	}
+	if w.headersSent {
+		return nil, nil, errors.New("response headers already sent")
+	}
+	w.hijacked = true
+	_ = w.conn.SetDeadline(time.Time{})
+	r := w.reader
+	if r == nil {
+		r = bufio.NewReader(w.conn)
+	}
+	return w.conn, bufio.NewReadWriter(r, bufio.NewWriter(w.conn)), nil
+}
+
+// Hijacked reports whether the caller took ownership of the socket via Hijack.
+func (w *MitmResponseWriter) Hijacked() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.hijacked
 }
 
 // sendHeaders writes the status line and headers exactly once. chunked is
@@ -187,6 +229,9 @@ func (w *MitmResponseWriter) writeNewBytes() {
 func (w *MitmResponseWriter) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.hijacked {
+		return
+	}
 	if !w.headersSent {
 		w.sendHeaders(true)
 	}
@@ -204,6 +249,9 @@ func (w *MitmResponseWriter) Flush() {
 func (w *MitmResponseWriter) Close() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.hijacked {
+		return
+	}
 	if !w.headersSent {
 		w.sendHeaders(false)
 	}

@@ -73,6 +73,16 @@ func TestTools_GrepGlobKeptOnGemini3_StrippedOnOlder_OptOutHonored(t *testing.T)
 	if err != nil || hasName(declNames(res), "Grep") {
 		t.Fatalf("opt-out must strip Grep on gemini-3.x: %v %v", declNames(res), err)
 	}
+	res, err = convertTools(t, body, "gemini-4-hydrogen-tiered-xhigh", on)
+	if err != nil || !hasName(declNames(res), "Grep") {
+		t.Fatalf("Grep must be declared for gemini-4.x by default: %v %v", declNames(res), err)
+	}
+	res, err = convertTools(t, body, "gemini-4-hydrogen-tiered-xhigh", func(c *config.TenantConfig) {
+		c.StripSearchTools, c.StripSearchToolsGemini3 = true, true
+	})
+	if err != nil || hasName(declNames(res), "Grep") {
+		t.Fatalf("opt-out must strip Grep on gemini-4.x: %v %v", declNames(res), err)
+	}
 }
 
 func TestTools_ToolChoiceValidation(t *testing.T) {

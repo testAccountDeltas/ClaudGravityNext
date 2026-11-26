@@ -27,6 +27,12 @@ func TestNormalizeModelID(t *testing.T) {
 func TestResolveTieringNormalisedAliases(t *testing.T) {
 	for _, id := range []string{"OPUS", "us.anthropic.claude-opus-4-5-20251101-v1:0", "claude-opus-4-1@20250805", "claude-opus-4-5[1m]", "claude-3-opus-latest"} {
 		m, _ := ResolveTieringAndEffort(map[string]interface{}{"model": id}, "", "")
+		if m != "gemini-4-hydrogen-tiered-xhigh" {
+			t.Errorf("%s -> %s, want gemini-4-hydrogen-tiered-xhigh", id, m)
+		}
+	}
+	for _, id := range []string{"claude-fable-5-2", "fable"} {
+		m, _ := ResolveTieringAndEffort(map[string]interface{}{"model": id}, "", "")
 		if m != "gemini-3.8-flash-tiered" {
 			t.Errorf("%s -> %s, want gemini-3.8-flash-tiered", id, m)
 		}
@@ -49,12 +55,20 @@ func TestCompactionWorkflowTier(t *testing.T) {
 	th := map[string]interface{}{"type": "adaptive"}
 	for _, class := range []string{"compaction", "workflow"} {
 		m, b := ResolveTieringAndEffort(map[string]interface{}{"model": "claude-opus-4-5", "thinking": th}, class, "")
-		if m != "gemini-3.8-flash-medium" || b != 8192 {
-			t.Errorf("%s with thinking: %s/%d", class, m, b)
+		if m != "gemini-4-hydrogen-medium" || b != 8192 {
+			t.Errorf("%s opus with thinking: %s/%d", class, m, b)
 		}
 		m, b = ResolveTieringAndEffort(map[string]interface{}{"model": "claude-opus-4-5"}, class, "")
+		if m != "gemini-4-hydrogen-medium" || b != 0 {
+			t.Errorf("%s opus without thinking: %s/%d", class, m, b)
+		}
+		m, b = ResolveTieringAndEffort(map[string]interface{}{"model": "claude-fable-5-2", "thinking": th}, class, "")
+		if m != "gemini-3.8-flash-medium" || b != 8192 {
+			t.Errorf("%s fable with thinking: %s/%d", class, m, b)
+		}
+		m, b = ResolveTieringAndEffort(map[string]interface{}{"model": "claude-fable-5-2"}, class, "")
 		if m != "gemini-3.8-flash-medium" || b != 0 {
-			t.Errorf("%s without thinking: %s/%d", class, m, b)
+			t.Errorf("%s fable without thinking: %s/%d", class, m, b)
 		}
 	}
 }

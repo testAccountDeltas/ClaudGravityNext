@@ -34,8 +34,9 @@ type GenerationConfig struct {
 // token cap) are internal/accounts/tiering's (already ported) output
 // contract — this type just carries whatever that package decided.
 type ThinkingConfig struct {
-	IncludeThoughts bool  `json:"includeThoughts,omitempty"`
-	ThinkingBudget  int64 `json:"thinkingBudget"`
+	IncludeThoughts bool   `json:"includeThoughts,omitempty"`
+	ThinkingBudget  int64  `json:"thinkingBudget"`
+	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
 }
 
 // SafetySetting is one entry controlling a harm category's blocking

@@ -34,16 +34,13 @@ var (
 	AntigravityClientID     = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
 	AntigravityClientSecret = ""
 
-	// AntigravityUserAgent is the exact header the real Antigravity client
-	// sends on its own CloudCode calls — the literal "1.X.X" is not an
-	// unfilled placeholder, that's the string the real client sends.
-	// CloudCode gates its answer on this (an outdated version is served a
-	// reduced model set / coarser quota view), so this needs bumping in
-	// step with Google's shipping Antigravity release when that starts
-	// happening. config.json's server.antigravity_user_agent overrides
-	// this at startup (InitAccountManager) if set, so it can be bumped
-	// without recompiling.
-	AntigravityUserAgent = "vscode/1.X.X (Antigravity/4.3.0)"
+	// AntigravityUserAgent is the User-Agent header sent on CloudCode calls.
+	// CloudCode gates its model catalog on this header (the legacy vscode/1.X.X
+	// string omits Gemini 4 Hydrogen models, whereas antigravity/cli/* receives
+	// the full Hydrogen catalog and shared quota summary). config.json's
+	// server.antigravity_user_agent overrides this at startup
+	// (InitAccountManager) if set, so it can be bumped without recompiling.
+	AntigravityUserAgent = "antigravity/cli/2.17.0"
 )
 
 const (

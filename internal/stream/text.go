@@ -27,10 +27,37 @@ func (f *FSM) FlushTextHoldBuffer(stripSeq string) error {
 		}
 	}
 	text = sanitize.StripSyntheticXMLTags(text)
+	if f.artifactViewerURL != "" {
+		text = sanitize.RewriteArtifactURLs(text, f.artifactViewerURL)
+	}
 	if text == "" {
 		return nil
 	}
 	return f.emitTextDelta(text)
+}
+
+func (f *FSM) prepareTextHold(text string) {
+	f.textHoldBuffer += text
+	f.textHoldBuffer = sanitize.StripSyntheticXMLTags(f.textHoldBuffer)
+	if f.artifactViewerURL != "" {
+		f.textHoldBuffer = sanitize.RewriteArtifactURLs(f.textHoldBuffer, f.artifactViewerURL)
+	}
+}
+
+func (f *FSM) textHoldLimit() int {
+	holdLen := f.maxStopLen
+	if f.maxStopLen > 0 {
+		holdLen = f.maxStopLen - 1 // a full sequence is matched above, so only a proper prefix can still be pending
+	}
+	if partialTag := sanitize.PartialSyntheticTagSuffix(f.textHoldBuffer); partialTag != "" && len(partialTag) > holdLen {
+		holdLen = len(partialTag)
+	}
+	if f.artifactViewerURL != "" {
+		if partialURL := sanitize.PartialArtifactURLSuffix(f.textHoldBuffer); partialURL != "" && len(partialURL) > holdLen {
+			holdLen = len(partialURL)
+		}
+	}
+	return holdLen
 }
 
 func (f *FSM) emitTextDelta(text string) error {

@@ -75,7 +75,7 @@ func (e *adminEnv) do(t *testing.T, method, path, body string, auth bool) (int, 
 func TestAdminAPI_EveryEndpointRequiresTheDashboardPassword(t *testing.T) {
 	e := newAdminEnv(t)
 	for _, p := range []string{"/api/accounts", "/api/accounts/toggle?email=a@example.com&disabled=1", "/api/refresh-quotas",
-		"/api/warmup?email=a@example.com", "/api/warmup-all", "/api/logs", "/api/sessions", "/api/session?id=x", "/api/model-catalog", "/api/keys"} {
+		"/api/warmup?email=a@example.com", "/api/logs", "/api/sessions", "/api/session?id=x", "/api/model-catalog", "/api/keys"} {
 		if code, _ := e.do(t, http.MethodPost, p, "", false); code != http.StatusUnauthorized {
 			t.Errorf("%s without credentials = %d, want 401", p, code)
 		}
@@ -148,14 +148,13 @@ func TestAdminAPI_RefreshAndWarmup(t *testing.T) {
 	if code != http.StatusBadGateway || !strings.Contains(body, `"success":false`) {
 		t.Fatalf("warmup unknown: %d %s", code, body)
 	}
-	// Neither account has a never-used weekly window, so nothing is warmed.
-	code, body = e.do(t, http.MethodPost, "/api/warmup-all", "", true)
-	var res struct {
-		Success bool `json:"success"`
-		Count   int  `json:"count"`
+	// Bulk warmup endpoint is intentionally removed.
+	if code, _ := e.do(t, http.MethodPost, "/api/warmup-all", "", true); code == http.StatusOK {
+		t.Fatalf("/api/warmup-all must not be served (got 200)")
 	}
-	if code != 200 || json.Unmarshal([]byte(body), &res) != nil || !res.Success || res.Count != 0 {
-		t.Fatalf("warmup-all: %d %s", code, body)
+	// Dashboard HTML must not expose bulk warmup controls.
+	if code, html := e.do(t, http.MethodGet, "/dashboard", "", true); code != 200 || strings.Contains(html, "warmupAllFresh") {
+		t.Fatalf("dashboard unexpectedly still includes warmupAllFresh (code=%d)", code)
 	}
 	// The handler fires RefreshAllQuotas in the background; let it finish
 	// before cleanup resets the package-level state it reads.

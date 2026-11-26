@@ -74,14 +74,21 @@ type Result struct {
 // and a request would sail right past the 1M-token wall into a raw
 // Google 400 instead of being proactively trimmed.
 var fallbackMaxTokens = map[string]int64{
-	"gemini-3.8-flash":        1048576,
-	"gemini-3.8-flash-tiered": 1048576,
-	"gemini-3.8-flash-low":    1048576,
-	"gemini-3.8-flash-medium": 1048576,
-	"gemini-3.8-flash-high":   1048576,
-	"gemini-2.5-flash":        1048576,
-	"gemini-2.5-pro":          2097152,
-	"gemini-2.5-flash-lite":   1048576,
+	"gemini-4-hydrogen":              1048576,
+	"gemini-4-hydrogen-tiered-xhigh": 1048576,
+	"gemini-4-hydrogen-tiered-high":  1048576,
+	"gemini-4-hydrogen-low":          1048576,
+	"gemini-4-hydrogen-medium":       1048576,
+	"gemini-4-hydrogen-high":         1048576,
+	"gemini-4-hydrogen-xhigh":        1048576,
+	"gemini-3.8-flash":               1048576,
+	"gemini-3.8-flash-tiered":        1048576,
+	"gemini-3.8-flash-low":           1048576,
+	"gemini-3.8-flash-medium":        1048576,
+	"gemini-3.8-flash-high":          1048576,
+	"gemini-2.5-flash":               1048576,
+	"gemini-2.5-pro":                 2097152,
+	"gemini-2.5-flash-lite":          1048576,
 }
 
 // allowHistoryTruncation is the opt-in for silently dropping the oldest
@@ -310,9 +317,9 @@ func ConvertClaudeRequestToGemini(claudeJSON []byte, tenant config.TenantConfig,
 	out = applySystemInstruction(out, root, pendingNudgeKeys...)
 
 	// 5. Messages Translation.
-	// Grep/Glob are stripped only for the pre-3.x models; Gemini 3.x gets
+	// Grep/Glob are stripped only for pre-3.x models; Gemini 3.x and 4.x get
 	// them unless the tenant opts back in (strip_search_tools_gemini3).
-	tenant.StripSearchTools = tenant.StripSearchTools && (!isGemini3(modelName) || tenant.StripSearchToolsGemini3)
+	tenant.StripSearchTools = tenant.StripSearchTools && (!isGemini3OrNewer(modelName) || tenant.StripSearchToolsGemini3)
 	tn := computeToolNameInfo(root, tenant.StripSearchTools)
 	if err := validateToolChoice(root, tn); err != nil {
 		return Result{}, err

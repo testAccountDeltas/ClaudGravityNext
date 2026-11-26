@@ -87,3 +87,51 @@ func TestApplyGenerationConfig_ThinkingEnabled_AddsBudgetToMaxOutput(t *testing.
 		t.Fatalf("includeThoughts must be true when client enabled thinking: %s", out)
 	}
 }
+
+func TestApplyGenerationConfig_Gemini4Hydrogen_AntigravityVsPublicAPI(t *testing.T) {
+	withCatalog(t, accounts.AvailableModelInfo{
+		ID:                "gemini-4-hydrogen-tiered-xhigh",
+		Thinking:          true,
+		MaxOutput:         262144,
+		MinThinkingBudget: 32,
+	})
+
+	// Antigravity path uses thinkingBudget: -1 (ModeAuto) and full catalog MaxOutput.
+	outAG, _ := applyGenerationConfig("{}", gjson.Parse(`{"max_tokens":4096,"temperature":0.2}`), "gemini-4-hydrogen-tiered-xhigh", -1, true)
+	if got := gjson.Get(outAG, "generationConfig.thinkingConfig.thinkingBudget").Int(); got != -1 {
+		t.Fatalf("Antigravity thinkingBudget=%d, want -1: %s", got, outAG)
+	}
+	if got := gjson.Get(outAG, "generationConfig.maxOutputTokens").Int(); got != 262144 {
+		t.Fatalf("Antigravity maxOutputTokens=%d, want 262144: %s", got, outAG)
+	}
+
+	// Disabled thinking on Antigravity respects Hydrogen's minThinkingBudget=32 floor.
+	outFloor, _ := applyGenerationConfig("{}", gjson.Parse(`{"max_tokens":100}`), "gemini-4-hydrogen-tiered-xhigh", 0, true)
+	if got := gjson.Get(outFloor, "generationConfig.thinkingConfig.thinkingBudget").Int(); got != 32 {
+		t.Fatalf("Antigravity disabled floor thinkingBudget=%d, want 32: %s", got, outFloor)
+	}
+	if gjson.Get(outFloor, "generationConfig.thinkingConfig.includeThoughts").Bool() {
+		t.Fatalf("includeThoughts must be false when budget==0: %s", outFloor)
+	}
+
+	// Public Gemini Developer API (!isAntigravity) uses thinkingLevel and omits
+	// thinkingBudget and sampling overrides.
+	outPub, _ := applyGenerationConfig("{}", gjson.Parse(`{"max_tokens":4096,"temperature":0.2,"top_p":0.9,"top_k":20}`), "gemini-4-hydrogen-tiered-xhigh", -1, false)
+	if got := gjson.Get(outPub, "generationConfig.thinkingConfig.thinkingLevel").String(); got != "xhigh" {
+		t.Fatalf("public thinkingLevel=%q, want xhigh: %s", got, outPub)
+	}
+	if gjson.Get(outPub, "generationConfig.thinkingConfig.thinkingBudget").Exists() {
+		t.Fatalf("public Gemini 4 must not set thinkingBudget: %s", outPub)
+	}
+	for _, k := range []string{"temperature", "topP", "topK"} {
+		if gjson.Get(outPub, "generationConfig."+k).Exists() {
+			t.Fatalf("public Gemini 4 must omit sampling override %q: %s", k, outPub)
+		}
+	}
+
+	// Explicit/max thinkingBudget above Google's 65535 limit must clamp cleanly.
+	outMax, clampedBudget := applyGenerationConfig("{}", gjson.Parse(`{"max_tokens":128000}`), "gemini-4-hydrogen-tiered-xhigh", 65536, true)
+	if clampedBudget != 65535 || gjson.Get(outMax, "generationConfig.thinkingConfig.thinkingBudget").Int() != 65535 {
+		t.Fatalf("thinkingBudget=%d returned=%d, want 65535: %s", gjson.Get(outMax, "generationConfig.thinkingConfig.thinkingBudget").Int(), clampedBudget, outMax)
+	}
+}

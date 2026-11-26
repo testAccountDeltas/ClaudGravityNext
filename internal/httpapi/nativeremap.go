@@ -34,10 +34,14 @@ func remapExhaustedNative3PModel(rid uint64, convAnchor string, bodyBytes []byte
 	if !ok || !ratelimit.IsNative3PModelExhausted(peekAcc) {
 		return bodyBytes
 	}
-	patched, err := sjson.SetBytes(bodyBytes, "model", "gemini-3.8-flash-tiered")
+	fallback := "gemini-3.8-flash-tiered"
+	if reqModel == "claude-opus-4-6-thinking" {
+		fallback = "gemini-4-hydrogen-tiered-xhigh"
+	}
+	patched, err := sjson.SetBytes(bodyBytes, "model", fallback)
 	if err != nil {
 		return bodyBytes
 	}
-	logx.LogGateway("[#%d] !! Native 3P model %s has exhausted quota on sticky account %s, remapping to gemini-3.8-flash-tiered", rid, reqModel, peekEmail)
+	logx.LogGateway("[#%d] !! Native 3P model %s has exhausted quota on sticky account %s, remapping to %s", rid, reqModel, peekEmail, fallback)
 	return patched
 }

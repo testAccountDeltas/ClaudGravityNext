@@ -101,12 +101,13 @@ func TestHandleBootstrapSpoof_ModelEntitlements(t *testing.T) {
 	requiredModels := []string{
 		// Static Claude models and aliases
 		"opus", "sonnet", "haiku", "fable", "mythos",
-		"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5",
+		"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-fable-5-2", "claude-mythos-5",
 		"claude-3-7-sonnet", "claude-3-5-sonnet", "claude-3-5-haiku",
 		"claude-3-haiku-20240307", "claude-3-sonnet-20240229",
 		"claude-opus-4-0", "claude-opus-4-5", "claude-opus-4-6",
 		// Gemini models
 		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.8-flash-tiered",
+		"gemini-4-hydrogen-tiered-xhigh", "gemini-4-hydrogen-high", "gemini-4-hydrogen-xhigh",
 	}
 
 	for _, model := range requiredModels {

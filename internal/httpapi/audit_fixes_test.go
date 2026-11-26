@@ -96,10 +96,11 @@ func TestCommonAPIMiddleware_PreservesIncomingRequestID(t *testing.T) {
 // advertise them: a client picking one only gets a 404 from Google. (A direct
 // lookup of an unknown gemini-* id still resolves through lookupModel's
 // family fallback, by design.)
-func TestAllModels_DoesNotAdvertiseGemini4(t *testing.T) {
+func TestAllModels_DoesNotAdvertiseDisabledGemini4(t *testing.T) {
 	for _, m := range allModels() {
-		if id, _ := m["id"].(string); strings.HasPrefix(id, "gemini-4") {
-			t.Errorf("model list advertises %q, which Cloud Code does not serve", id)
+		id, _ := m["id"].(string)
+		if strings.HasPrefix(id, "gemini-4") && !strings.HasPrefix(id, "gemini-4-hydrogen") || strings.HasSuffix(id, "-sonar") || strings.HasSuffix(id, "-disabled") {
+			t.Errorf("model list advertises unsupported/disabled model %q", id)
 		}
 	}
 }

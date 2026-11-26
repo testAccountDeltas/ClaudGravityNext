@@ -121,3 +121,29 @@ func TestFetchAvailableModels_FallsToTheNextAccountWhenARefreshFails(t *testing.
 		t.Fatalf("one broken account must not hide the catalog: %d models, err=%v", len(got), err)
 	}
 }
+
+func TestFetchAvailableModels_SkipsDisabledAndInternalSonar(t *testing.T) {
+	resetCatalog(t)
+	seedAccounts(t, catalogAccount("cat-filter@example.com"))
+	var gotUA string
+	withStubbedHTTPClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		gotUA = r.Header.Get("User-Agent")
+		reply := `{"models":{
+			"gemini-4-hydrogen-tiered-xhigh":{"displayName":"Gemini 4 Hydrogen (XHigh)","modelProvider":"GOOGLE","maxTokens":1048576,"maxOutputTokens":262144,"supportsThinking":true,"minThinkingBudget":32},
+			"gemini-4-argon-disabled":{"displayName":"Gemini 4 Argon","disabled":true,"modelProvider":"GOOGLE"},
+			"gemini-4-hydrogen-sonar":{"modelProvider":"GOOGLE","maxTokens":1048576}
+		}}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(reply)), Header: http.Header{}}, nil
+	}))
+
+	got, err := globalAccountManager.FetchAvailableModels(true)
+	if err != nil {
+		t.Fatalf("FetchAvailableModels error = %v", err)
+	}
+	if !strings.HasPrefix(gotUA, "antigravity/cli/") {
+		t.Fatalf("User-Agent = %q, want antigravity/cli/* prefix", gotUA)
+	}
+	if len(got) != 1 || got[0].ID != "gemini-4-hydrogen-tiered-xhigh" {
+		t.Fatalf("unexpected filtered catalog: %+v", got)
+	}
+}

@@ -14,9 +14,10 @@ import "strings"
 const cheapThinkingBudget = 2048
 
 // maxThinkingBudget is the fixed budget of effort "max" (agy's own table:
-// low 2048, medium 8192, high 16384, max 65536; xhigh is left to the model).
-// applyGenerationConfig lowers it when it would leave no room for the answer.
-const maxThinkingBudget = 65536
+// low 2048, medium 8192, high 16384, max 65535; xhigh is left to the model).
+// Upstream Google enforces thinking_budget <= 65535, and applyGenerationConfig
+// lowers it further when it would leave no room for the answer.
+const maxThinkingBudget = 65535
 
 // midThinkingBudget caps thinking for compaction/workflow requests.
 const midThinkingBudget = 8192
@@ -30,7 +31,7 @@ const midThinkingBudget = 8192
 //   - high -> 16384 (gemini-3.8-flash-high)
 //   - xhigh / ultracode -> -1 (gemini-3.8-flash-tiered with Native Google ModeAuto:
 //     the model sizes its own thinking; also the default when no effort is given)
-//   - max -> 65536 (gemini-3.8-flash-tiered, fixed)
+//   - max -> 65535 (gemini-3.8-flash-tiered / gemini-4-hydrogen-tiered-xhigh, fixed)
 //   - auxiliary -> 2048 (gemini-3.8-flash-low, eliminates 20s stalls on metadata)
 //
 // The levels above only apply when the client ENABLED thinking (thinking.type
@@ -81,10 +82,13 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 			model = "gemini-3.8-flash-medium"
 		case "haiku":
 			model = "gemini-2.5-flash"
+		case "fable", "mythos":
+			// Fable 5.2 / Mythos use Gemini 3.8 Flash tiered.
+			model = "gemini-3.8-flash-tiered"
+		case "opus":
+			// Opus binds to Gemini 4 Hydrogen flagship tiered-xhigh.
+			model = "gemini-4-hydrogen-tiered-xhigh"
 		default:
-			// Opus/Fable/Mythos: flagship tiered class (the bare aliases
-			// "sonnet"/"opus"/"haiku"/"fable" that Claude Code's Agent tool
-			// sends are covered by the same substring match).
 			model = "gemini-3.8-flash-tiered"
 		}
 	} else if model != "" && !strings.HasPrefix(model, "gemini-") {
@@ -126,76 +130,14 @@ func ResolveTieringAndEffort(claudeReqJSON map[string]interface{}, reqClass stri
 		}
 	}
 
-	// 2. Dynamic sub-tier and budget mapping for Gemini 3.8 / tiered models
+	// 2. Dynamic sub-tier and budget mapping for multi-tier Gemini families
 	budget := 8192 // default medium
 
-	if strings.HasPrefix(model, "gemini-3.8-flash") || model == "gemini-3.8-flash-tiered" {
-		// Opus/Fable/Mythos were already mapped to the top "tiered"
-		// (ModeAuto) class above specifically because they're the
-		// flagship tier — but Sonnet maps to "-medium" and enters this
-		// exact same switch too, so without remembering which one this
-		// was, the no-effort default case below silently downgraded every
-		// Opus-class request with no explicit output_config.effort
-		// (anything not setting CLAUDE_CODE_EFFORT_LEVEL) from "tiered"
-		// down to plain "-medium" with a capped 8192 budget.
-		wasTieredClass := model == "gemini-3.8-flash-tiered"
-		base := "gemini-3.8-flash"
-		if reqClass == "auxiliary" || isLightweightSubagent {
-			model = base + "-low"
-			budget = 2048
-		} else if midClass && effort != "low" && effort != "none" && effort != "off" && effort != "disabled" {
-			model = base + "-medium"
-			budget = midThinkingBudget
-		} else {
-			switch effort {
-			case "low":
-				if wasTieredClass {
-					// Opus/Fable/Mythos never degrade all the way to the
-					// bottom tier even on an explicit "low" — same floor
-					// the rest of this class gets below.
-					model = base + "-medium"
-					budget = 8192
-				} else {
-					model = base + "-low"
-					budget = 2048
-				}
-			case "medium":
-				// low / medium / high are fixed budgets for every model
-				// class, Opus-class included; only xhigh+ (and no effort at
-				// all) lets the model size its own thinking.
-				model = base + "-medium"
-				budget = 8192
-			case "high":
-				model = base + "-high"
-				budget = 16384
-			case "xhigh", "ultracode":
-				model = "gemini-3.8-flash-tiered"
-				budget = -1 // Native Google ModeAuto
-			case "max":
-				model = "gemini-3.8-flash-tiered"
-				budget = maxThinkingBudget
-			case "none", "off", "disabled":
-				// A Round 15 audit caught that these literal thinking-off
-				// values (as opposed to the standard Anthropic
-				// thinking.type=="disabled" object, or no effort at all)
-				// fell into default: below, which for an Opus-class
-				// request selected the HEAVIEST ModeAuto/unlimited-
-				// thinking tier — the exact opposite of what was
-				// explicitly asked for, costing ~30-40s of extra latency
-				// and quota the caller was specifically trying to avoid.
-				model = base + "-medium"
-				budget = 0
-			default:
-				if wasTieredClass {
-					model = "gemini-3.8-flash-tiered"
-					budget = -1
-				} else {
-					// Default when no explicit effort is passed: balanced medium
-					model = base + "-medium"
-					budget = 8192
-				}
-			}
-		}
+	if resolvedModel, resolvedBudget, ok := resolveGeminiSubTier(
+		model, effort, reqClass, midClass, isLightweightSubagent, midThinkingBudget, maxThinkingBudget,
+	); ok {
+		model = resolvedModel
+		budget = resolvedBudget
 	} else if strings.HasSuffix(model, "-tiered") {
 		base := strings.TrimSuffix(model, "-tiered")
 		if reqClass == "auxiliary" || isLightweightSubagent {

@@ -14,6 +14,7 @@ import (
 	"claudgravity/internal/protocol/claude"
 	"claudgravity/internal/ratelimit"
 	"claudgravity/internal/reqctx"
+	"claudgravity/internal/sanitize"
 	"claudgravity/internal/speccapture"
 	"claudgravity/internal/stream"
 	"claudgravity/internal/tokens"
@@ -77,6 +78,23 @@ func stripOscIgnoreTag(claudeResp map[string]interface{}) {
 		if t, ok := b["type"].(string); ok && t == "text" {
 			if existing, ok := b["text"].(string); ok && loopguard.HasIgnoreLoopTag(existing) {
 				b["text"] = loopguard.StripIgnoreLoopTag(existing)
+			}
+		}
+	}
+}
+
+func rewriteArtifactURLsInResponse(claudeResp map[string]interface{}, viewerBaseURL string) {
+	if viewerBaseURL == "" {
+		return
+	}
+	contentBlocks, ok := claudeResp["content"].([]map[string]interface{})
+	if !ok {
+		return
+	}
+	for _, b := range contentBlocks {
+		if t, ok := b["type"].(string); ok && t == "text" {
+			if existing, ok := b["text"].(string); ok {
+				b["text"] = sanitize.RewriteArtifactURLs(existing, viewerBaseURL)
 			}
 		}
 	}

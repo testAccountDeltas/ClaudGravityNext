@@ -7,8 +7,16 @@ import "testing"
 func TestResolveTieringAndEffort_OpusMapsToTieredModeAuto(t *testing.T) {
 	req := map[string]interface{}{"model": "claude-opus-4-5", "thinking": map[string]interface{}{"type": "enabled"}}
 	model, budget := ResolveTieringAndEffort(req, "main", "main")
+	if model != "gemini-4-hydrogen-tiered-xhigh" || budget != -1 {
+		t.Fatalf("expected opus with no explicit effort to map to Hydrogen tiered ModeAuto (-1), got model=%q budget=%d", model, budget)
+	}
+}
+
+func TestResolveTieringAndEffort_FableMapsTo38FlashTiered(t *testing.T) {
+	req := map[string]interface{}{"model": "claude-fable-5-2", "thinking": map[string]interface{}{"type": "enabled"}}
+	model, budget := ResolveTieringAndEffort(req, "main", "main")
 	if model != "gemini-3.8-flash-tiered" || budget != -1 {
-		t.Fatalf("expected opus with no explicit effort to map to tiered ModeAuto (-1), got model=%q budget=%d", model, budget)
+		t.Fatalf("expected fable 5.2 with no explicit effort to map to 3.8 flash tiered ModeAuto (-1), got model=%q budget=%d", model, budget)
 	}
 }
 
@@ -23,7 +31,7 @@ func TestResolveTieringAndEffort_HaikuIsZeroBudgetByDefault(t *testing.T) {
 func TestResolveTieringAndEffort_AuxiliaryRequestClassIsCheapTier(t *testing.T) {
 	req := map[string]interface{}{"model": "claude-opus-4-5", "thinking": map[string]interface{}{"type": "enabled"}}
 	model, budget := ResolveTieringAndEffort(req, "auxiliary", "main")
-	if model != "gemini-3.8-flash-low" || budget != 2048 {
+	if model != "gemini-4-hydrogen-low" || budget != 2048 {
 		t.Fatalf("expected auxiliary opus request to downgrade to the cheap low tier, got model=%q budget=%d", model, budget)
 	}
 }
@@ -31,7 +39,7 @@ func TestResolveTieringAndEffort_AuxiliaryRequestClassIsCheapTier(t *testing.T) 
 func TestResolveTieringAndEffort_LightweightSubagentIsCheapTier(t *testing.T) {
 	req := map[string]interface{}{"model": "claude-opus-4-5", "thinking": map[string]interface{}{"type": "enabled"}}
 	model, budget := ResolveTieringAndEffort(req, "subagent", "sub:Explore")
-	if model != "gemini-3.8-flash-low" || budget != 2048 {
+	if model != "gemini-4-hydrogen-low" || budget != 2048 {
 		t.Fatalf("expected a known-lightweight subagent (sub:Explore) to get the cheap tier regardless of model, got model=%q budget=%d", model, budget)
 	}
 }
@@ -63,15 +71,15 @@ func TestResolveTieringAndEffort_ExplicitEffortLevels(t *testing.T) {
 	}
 }
 
-func TestResolveTieringAndEffort_OpusNeverDegradesBelowMediumOnLow(t *testing.T) {
+func TestResolveTieringAndEffort_OpusLowEffortUsesHydrogenLow(t *testing.T) {
 	req := map[string]interface{}{
 		"model":         "claude-opus-4-5",
 		"thinking":      map[string]interface{}{"type": "enabled"},
 		"output_config": map[string]interface{}{"effort": "low"},
 	}
 	model, budget := ResolveTieringAndEffort(req, "main", "main")
-	if model != "gemini-3.8-flash-medium" || budget != 8192 {
-		t.Fatalf("expected opus-class model to floor at medium even on explicit low effort, got model=%q budget=%d", model, budget)
+	if model != "gemini-4-hydrogen-low" || budget != 2048 {
+		t.Fatalf("expected opus on low effort to map to gemini-4-hydrogen-low (2048), got model=%q budget=%d", model, budget)
 	}
 }
 
@@ -143,8 +151,13 @@ func TestResolveTieringAndEffort_AnthropicThinkingBudgetTokensZero(t *testing.T)
 func TestResolveTieringAndEffort_BareModelAlias(t *testing.T) {
 	req := map[string]interface{}{"model": "opus"}
 	model, _ := ResolveTieringAndEffort(req, "main", "main")
-	if model != "gemini-3.8-flash-tiered" {
+	if model != "gemini-4-hydrogen-tiered-xhigh" {
 		t.Fatalf("the bare alias 'opus' (no claude- prefix) must map the same as claude-opus-*, got %q", model)
+	}
+	fableReq := map[string]interface{}{"model": "fable"}
+	fableModel, _ := ResolveTieringAndEffort(fableReq, "main", "main")
+	if fableModel != "gemini-3.8-flash-tiered" {
+		t.Fatalf("the bare alias 'fable' must map to gemini-3.8-flash-tiered, got %q", fableModel)
 	}
 }
 
@@ -156,8 +169,8 @@ func TestResolveTieringAndEffort_OpusMaxEffort(t *testing.T) {
 			"output_config": map[string]interface{}{"effort": effort},
 		}
 		model, budget := ResolveTieringAndEffort(req, "main", "main")
-		if model != "gemini-3.8-flash-tiered" || budget != want {
-			t.Fatalf("expected opus with %q effort to map to gemini-3.8-flash-tiered (%d), got model=%q budget=%d", effort, want, model, budget)
+		if model != "gemini-4-hydrogen-tiered-xhigh" || budget != want {
+			t.Fatalf("expected opus with %q effort to map to gemini-4-hydrogen-tiered-xhigh (%d), got model=%q budget=%d", effort, want, model, budget)
 		}
 	}
 }

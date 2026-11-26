@@ -81,7 +81,6 @@ func RegisterDashboardRoutes(mux *http.ServeMux, cfgMgr *config.ConfigManager) {
 	mux.HandleFunc("/api/accounts/toggle", requireDashboardAuth(cfgMgr, handleAPIAccountToggle))
 	mux.HandleFunc("/api/refresh-quotas", requireDashboardAuth(cfgMgr, handleAPIRefreshQuotas))
 	mux.HandleFunc("/api/warmup", requireDashboardAuth(cfgMgr, handleAPIWarmup))
-	mux.HandleFunc("/api/warmup-all", requireDashboardAuth(cfgMgr, handleAPIWarmupAll))
 	mux.HandleFunc("/api/logs", requireDashboardAuth(cfgMgr, func(w http.ResponseWriter, r *http.Request) {
 		handleAPILogs(cfgMgr, w, r)
 	}))

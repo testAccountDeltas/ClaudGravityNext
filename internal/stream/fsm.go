@@ -121,6 +121,7 @@ type FSM struct {
 	stopMatched                               string // the client stop_sequence the gateway itself found in the text (stopseq.go); "" = none
 
 	prefillText         string
+	artifactViewerURL   string
 	prefillEmitted      bool
 	pendingFinishReason string
 
@@ -171,6 +172,7 @@ func NewFSM(writer *SafeSSEWriter, rid uint64, p *reqctx.Params, st *reqctx.Stat
 		stopSequences:          p.StopSequences,
 		maxStopLen:             maxStopLen,
 		prefillText:            p.PrefillText,
+		artifactViewerURL:      p.ArtifactViewerURL,
 		visibleCap:             p.MaxTokens,
 		retryEmptyMaxToken:     !st.OutputAllowanceBumped,
 		contextManagement:      p.ContextManagement,
@@ -328,8 +330,7 @@ func (f *FSM) HandleText(text string) error {
 		f.updatePendingThinkingSignature(f.thoughtSignature)
 	}
 
-	f.textHoldBuffer += text
-	f.textHoldBuffer = sanitize.StripSyntheticXMLTags(f.textHoldBuffer)
+	f.prepareTextHold(text)
 
 	// Stop sequences are matched here, over everything not yet emitted:
 	// the hold-back keeps at least maxStopLen-1 trailing bytes, so a
@@ -352,15 +353,7 @@ func (f *FSM) HandleText(text string) error {
 		return f.FinishStream("STOP")
 	}
 
-	holdLen := f.maxStopLen
-	if f.maxStopLen > 0 {
-		holdLen = f.maxStopLen - 1 // a full sequence is matched above, so only a proper prefix can still be pending
-	}
-	if partialTag := sanitize.PartialSyntheticTagSuffix(f.textHoldBuffer); partialTag != "" {
-		if len(partialTag) > holdLen {
-			holdLen = len(partialTag)
-		}
-	}
+	holdLen := f.textHoldLimit()
 
 	if holdLen > 0 {
 		if len(f.textHoldBuffer) <= holdLen {

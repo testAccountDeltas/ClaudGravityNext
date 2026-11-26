@@ -9,6 +9,7 @@ package httpapi
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"claudgravity/internal/ctxedit"
 	"claudgravity/internal/editrepair"
 	"claudgravity/internal/logx"
+	"claudgravity/internal/mitm"
 	"claudgravity/internal/orchestrate"
 	"claudgravity/internal/reqctx"
 	"claudgravity/internal/requestlog"
@@ -252,6 +254,7 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		HasSafeguards:        hasSafeguards,
 		SuppressToolCalls:    gjson.GetBytes(result.GeminiBody, "toolConfig.functionCallingConfig.mode").String() == "NONE",
 		PrefillText:          result.PrefillText,
+		ArtifactViewerURL:    resolveArtifactViewerURL(serverCfg, r),
 		SyntheticReasonTools: result.SyntheticReasonTools,
 		ReverseToolNameMap:   result.ReverseToolNameMap,
 		RawClaudeBody:        bodyBytes,
@@ -287,6 +290,23 @@ func handleMessages(cfgMgr *config.ConfigManager, w http.ResponseWriter, r *http
 		// line above; the client gets a short sanitised message.
 		WriteAnthropicErrorForModel(w, status, anthropicerr.TypeForStatus(status), ClientUpstreamMessage(status, execErr.Error()), result.ResolvedModel)
 	}
+}
+
+func resolveArtifactViewerURL(cfg config.ServerConfig, r *http.Request) string {
+	if v := strings.TrimSpace(cfg.ArtifactViewerURL); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	if r != nil && r.Host != "" && !mitm.IsAnthropicHost(r.Host) {
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		return scheme + "://" + r.Host
+	}
+	if cfg.PublicHost != "" && cfg.Port > 0 {
+		return "http://" + net.JoinHostPort(cfg.PublicHost, strconv.Itoa(cfg.Port))
+	}
+	return ""
 }
 
 // mergeAnthropicBetaHeader merges the incoming HTTP anthropic-beta header

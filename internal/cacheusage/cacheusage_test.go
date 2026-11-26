@@ -25,6 +25,7 @@ func TestAnalyzeCountsAndTTL(t *testing.T) {
 func TestMinTokens(t *testing.T) {
 	cases := map[string]int64{
 		"claude-opus-4-5": 4096, "claude-opus-4-1": 1024, "claude-sonnet-4-5": 1024,
+		"claude-fable-5-2": 4096, "claude-mythos-5-2": 4096,
 		"claude-sonnet-4-6": 2048, "claude-haiku-4-5": 4096, "claude-3-5-haiku": 1024,
 		"claude-haiku-3-5": 2048, "gemini-x": 1024,
 	}

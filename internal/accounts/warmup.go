@@ -24,39 +24,25 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"claudgravity/internal/warmup"
 )
 
-// needsGeminiWeeklyWarmup reports whether acc's Gemini weekly quota bucket
-// still sits at (effectively) 100% remaining — i.e. it's never been
-// activated by a real request, so the dashboard's "warm up stale accounts"
-// button should bother touching it at all.
-func needsGeminiWeeklyWarmup(acc *Record) bool {
-	for _, grp := range acc.Quotas {
-		if !strings.Contains(strings.ToLower(grp.DisplayName), "gemini") {
-			continue
-		}
-		for _, b := range grp.Buckets {
-			if strings.Contains(strings.ToLower(b.Window), "week") && b.RemainingFraction >= 0.999 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// WarmupSingleAccount sends a 1-token lightweight query to activate the
-// account's 7-day window.
+// WarmupSingleAccount sends a lightweight query to activate a single account's
+// 7-day window. Bulk multi-account warmup was deliberately removed to avoid
+// synchronized farm-like bursts across accounts.
 func (am *AccountManager) WarmupSingleAccount(ctx context.Context, email string) (string, error) {
 	am.mu.RLock()
 	acc, ok := am.accounts[email]
+	disabled := ok && acc.Disabled
 	am.mu.RUnlock()
 
 	if !ok {
 		return "", fmt.Errorf("account %s not found", email)
+	}
+	if disabled {
+		return "", fmt.Errorf("account %s is disabled", email)
 	}
 
 	token, err := am.RefreshAccessToken(email)
@@ -68,10 +54,11 @@ func (am *AccountManager) WarmupSingleAccount(ctx context.Context, email string)
 	projectID := acc.ProjectID
 	am.mu.RUnlock()
 
-	rawRequest := `{"contents":[{"role":"user","parts":[{"text":"1"}]}],"generationConfig":{"maxOutputTokens":1}}`
+	rawRequest := `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"systemInstruction":{"parts":[{"text":"You are a helpful assistant."}]}}`
 	wrapped := warmup.WrapAntigravityPayload("gemini-2.5-flash", []byte(rawRequest), projectID, 0, "")
 
 	var lastErr error
+	var lastStatus int
 	for _, host := range warmup.AntigravityHosts {
 		url := host + "/v1internal:generateContent"
 		req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(wrapped)))
@@ -81,6 +68,7 @@ func (am *AccountManager) WarmupSingleAccount(ctx context.Context, email string)
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", AntigravityUserAgent)
 
 		resp, err := httpClient().Do(req)
@@ -100,6 +88,7 @@ func (am *AccountManager) WarmupSingleAccount(ctx context.Context, email string)
 			return fmt.Sprintf("Успешный прогрев через %s", host), nil
 		}
 
+		lastStatus = resp.StatusCode
 		lastErr = fmt.Errorf("host %s returned %d: %s", host, resp.StatusCode, string(respBytes))
 		if resp.StatusCode != http.StatusTooManyRequests {
 			break
@@ -109,35 +98,10 @@ func (am *AccountManager) WarmupSingleAccount(ctx context.Context, email string)
 	am.mu.Lock()
 	acc.LastError = fmt.Sprintf("Warmup failed: %v", lastErr)
 	am.mu.Unlock()
-	return "", lastErr
-}
-
-// WarmupAllFreshAccounts warms up every non-disabled account whose Gemini
-// weekly window still sits at 100% (never activated), concurrently. Returns
-// the emails that were actually warmed and any per-account errors.
-func (am *AccountManager) WarmupAllFreshAccounts(ctx context.Context) (warmed []string, errs map[string]string) {
-	accs := am.GetAccounts()
-	errs = make(map[string]string)
-
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, acc := range accs {
-		if acc.Disabled || !needsGeminiWeeklyWarmup(acc) {
-			continue
-		}
-		wg.Add(1)
-		go func(email string) {
-			defer wg.Done()
-			_, err := am.WarmupSingleAccount(ctx, email)
-			mu.Lock()
-			if err != nil {
-				errs[email] = err.Error()
-			} else {
-				warmed = append(warmed, email)
-			}
-			mu.Unlock()
-		}(acc.Email)
+	if lastStatus == http.StatusForbidden {
+		am.RecordAccountError(email, lastStatus, lastErr.Error(), time.Now().Add(24*time.Hour))
+	} else if lastStatus != 0 {
+		am.RecordAccountError(email, lastStatus, lastErr.Error(), time.Time{})
 	}
-	wg.Wait()
-	return warmed, errs
+	return "", lastErr
 }

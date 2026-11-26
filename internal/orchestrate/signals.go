@@ -89,6 +89,10 @@ func wantsSingleToolUse(claudeBody []byte) bool {
 // (internal/translate always emits it regardless of which upstream the
 // request will hit).
 func stripThoughtFieldsForPublicAPI(geminiBody []byte) []byte {
+	return stripThoughtFieldsForPublicAPIModel(geminiBody, "")
+}
+
+func stripThoughtFieldsForPublicAPIModel(geminiBody []byte, modelName string) []byte {
 	if !gjson.GetBytes(geminiBody, "contents").Exists() {
 		return geminiBody
 	}
@@ -97,16 +101,42 @@ func stripThoughtFieldsForPublicAPI(geminiBody []byte) []byte {
 		return geminiBody
 	}
 	changed := false
+	isGemini4 := strings.HasPrefix(strings.ToLower(modelName), "gemini-4")
 	// internal/translate may have already baked in thinkingBudget: -1
 	// (ModeAuto), which only the internal CloudCode/Antigravity endpoint
 	// understands; the public API rejects it outright with 400
 	// INVALID_ARGUMENT. Pin it to a fixed, broadly-supported budget
-	// instead when present.
+	// instead when present, or normalize to thinkingLevel on Gemini 4.
 	if genCfg, ok := root["generationConfig"].(map[string]interface{}); ok {
+		if isGemini4 {
+			for _, k := range []string{"temperature", "topP", "topK"} {
+				if _, exists := genCfg[k]; exists {
+					delete(genCfg, k)
+					changed = true
+				}
+			}
+		}
 		if thinkCfg, ok := genCfg["thinkingConfig"].(map[string]interface{}); ok {
-			if budget, ok := thinkCfg["thinkingBudget"].(float64); ok && budget < 0 {
-				thinkCfg["thinkingBudget"] = 8192
-				changed = true
+			if budget, ok := thinkCfg["thinkingBudget"].(float64); ok {
+				if isGemini4 {
+					delete(thinkCfg, "thinkingBudget")
+					if _, hasLevel := thinkCfg["thinkingLevel"]; !hasLevel {
+						switch {
+						case budget < 0 || budget > 16384:
+							thinkCfg["thinkingLevel"] = "xhigh"
+						case budget <= 2048:
+							thinkCfg["thinkingLevel"] = "low"
+						case budget <= 8192:
+							thinkCfg["thinkingLevel"] = "medium"
+						default:
+							thinkCfg["thinkingLevel"] = "high"
+						}
+					}
+					changed = true
+				} else if budget < 0 {
+					thinkCfg["thinkingBudget"] = 8192
+					changed = true
+				}
 			}
 		}
 	}

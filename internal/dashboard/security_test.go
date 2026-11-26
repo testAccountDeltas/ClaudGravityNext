@@ -108,7 +108,7 @@ func TestMutatingRoutes_RequireDashboardCredentials(t *testing.T) {
 		{"POST", "/api/keys"}, {"DELETE", "/api/keys?key=" + "anything"}, {"PUT", "/api/keys"},
 		{"DELETE", "/api/accounts?email=a@b.c"}, {"POST", "/api/accounts"}, {"POST", "/api/accounts/toggle?email=a@b.c&disabled=true"},
 		{"DELETE", "/api/logs"}, {"POST", "/api/logs"},
-		{"POST", "/api/warmup?email=a@b.c"}, {"POST", "/api/warmup-all"}, {"POST", "/api/refresh-quotas"},
+		{"POST", "/api/warmup?email=a@b.c"}, {"POST", "/api/refresh-quotas"},
 		{"POST", "/oauth/login"}, {"POST", "/oauth/callback?code=x&state=y"}, {"PUT", "/oauth/callback"},
 	}
 	do := func(method, path string, auth func(*http.Request)) int {

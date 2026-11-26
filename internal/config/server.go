@@ -12,6 +12,7 @@ type ServerConfig struct {
 	ReadTimeoutSeconds              int               `json:"read_timeout_seconds"`
 	TLSPort                         int               `json:"tls_port"`                                       // HTTPS listener for ANTHROPIC_BASE_URL (CA-signed, separate from the plain CONNECT-proxy port)
 	PublicHost                      string            `json:"public_host,omitempty"`                          // hostname/IP clients will actually connect to (e.g. a remote server's IP); included as a cert SAN so TLS hostname verification passes. Defaults to "localhost".
+	ArtifactViewerURL               string            `json:"artifact_viewer_url,omitempty"`                  // optional base URL (e.g. "http://203.0.113.10:9101") used when rewriting claude.ai/code/artifact links in model responses; auto-derived from request Host / PublicHost if empty.
 	DashboardPassword               string            `json:"dashboard_password"`                             // HTTP Basic Auth password for the web UI (username: admin); auto-generated on first run
 	ProxySecret                     string            `json:"proxy_secret"`                                   // required as Proxy-Authorization bearer on CONNECT requests; auto-generated on first run
 	GoogleOAuthClientID             string            `json:"google_oauth_client_id,omitempty"`               // overrides internal/accounts' default Antigravity OAuth client id if set — applied by the accounts package's own init wiring, NOT by this package (see config.go's LoadConfig doc comment for why)

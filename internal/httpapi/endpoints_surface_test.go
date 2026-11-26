@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"claudgravity/internal/accounts"
+	"claudgravity/internal/config"
 	"claudgravity/internal/testutil"
 )
 
@@ -306,9 +308,13 @@ func TestRemapExhaustedNative3PModel(t *testing.T) {
 	}
 	accounts.GlobalSelector().RememberAffinity(conv, "tu-0@example.com")
 
-	for _, m := range []string{"claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"} {
-		if got := remapExhaustedNative3PModel(1, conv, body(m)); gjson.GetBytes(got, "model").String() != "gemini-3.8-flash-tiered" {
-			t.Errorf("%s must move to Gemini when the sticky account has no 3P quota: %s", m, got)
+	for m, wantFallback := range map[string]string{
+		"claude-sonnet-4-6":        "gemini-3.8-flash-tiered",
+		"claude-opus-4-6-thinking": "gemini-4-hydrogen-tiered-xhigh",
+		"gpt-oss-120b-medium":      "gemini-3.8-flash-tiered",
+	} {
+		if got := remapExhaustedNative3PModel(1, conv, body(m)); gjson.GetBytes(got, "model").String() != wantFallback {
+			t.Errorf("%s must move to %s when the sticky account has no 3P quota: %s", m, wantFallback, got)
 		}
 	}
 	for _, m := range []string{"claude-sonnet-4-5", "gemini-3.8-flash-tiered", ""} {
@@ -344,5 +350,26 @@ func TestRetryAfterFromRecords(t *testing.T) {
 		if got := retryAfterFromRecords(c.recs, now); got != c.want {
 			t.Errorf("%s: got %v want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestResolveArtifactViewerURL(t *testing.T) {
+	cfg := config.ServerConfig{PublicHost: "203.0.113.10", Port: 9101}
+	rHTTP := httptest.NewRequest("POST", "http://203.0.113.10:9101/v1/messages", nil)
+	if got := resolveArtifactViewerURL(cfg, rHTTP); got != "http://203.0.113.10:9101" {
+		t.Fatalf("http host = %q", got)
+	}
+	rTLS := httptest.NewRequest("POST", "https://203.0.113.10:9103/v1/messages", nil)
+	rTLS.TLS = &tls.ConnectionState{}
+	if got := resolveArtifactViewerURL(cfg, rTLS); got != "https://203.0.113.10:9103" {
+		t.Fatalf("tls host = %q", got)
+	}
+	rMITM := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	if got := resolveArtifactViewerURL(cfg, rMITM); got != "http://203.0.113.10:9101" {
+		t.Fatalf("mitm fallback = %q", got)
+	}
+	cfgOverride := config.ServerConfig{PublicHost: "203.0.113.10", Port: 9101, ArtifactViewerURL: "https://art.example.test/"}
+	if got := resolveArtifactViewerURL(cfgOverride, rHTTP); got != "https://art.example.test" {
+		t.Fatalf("override = %q", got)
 	}
 }

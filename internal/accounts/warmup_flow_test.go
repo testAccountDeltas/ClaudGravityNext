@@ -130,6 +130,22 @@ func TestWarmupSingleAccount_HardRejectionStopsAndIsRecorded(t *testing.T) {
 	if !strings.HasPrefix(got.LastError, "Warmup failed") {
 		t.Fatalf("LastError = %q", got.LastError)
 	}
+	if got.ErrorKind != ErrKindForbidden {
+		t.Fatalf("ErrorKind = %q, want %q", got.ErrorKind, ErrKindForbidden)
+	}
+}
+
+func TestWarmupSingleAccount_SkipsDisabledAccount(t *testing.T) {
+	a := warmAcc("wu-off@example.com")
+	a.Disabled = true
+	seedAccounts(t, a)
+	withStubbedHTTPClient(t, roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("disabled account must not hit the network during warmup")
+		return nil, nil
+	}))
+	if _, err := globalAccountManager.WarmupSingleAccount(context.Background(), a.Email); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("err = %v, want disabled error", err)
+	}
 }
 
 func TestWarmupSingleAccount_TokenRefreshFailure(t *testing.T) {
@@ -140,58 +156,5 @@ func TestWarmupSingleAccount_TokenRefreshFailure(t *testing.T) {
 	}))
 	if _, err := globalAccountManager.WarmupSingleAccount(context.Background(), a.Email); err == nil || !strings.Contains(err.Error(), "token refresh failed") {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-func weeklyQuota(frac float64) []QuotaGroup {
-	return []QuotaGroup{{DisplayName: "Gemini Models", Buckets: []QuotaBucket{{Window: "weekly", RemainingFraction: frac}}}}
-}
-
-func TestNeedsGeminiWeeklyWarmup(t *testing.T) {
-	claude := []QuotaGroup{{DisplayName: "Claude", Buckets: []QuotaBucket{{Window: "weekly", RemainingFraction: 1}}}}
-	for _, c := range []struct {
-		name string
-		q    []QuotaGroup
-		want bool
-	}{
-		{"untouched weekly window", weeklyQuota(1), true},
-		{"used weekly window", weeklyQuota(0.7), false},
-		{"only a 5h bucket", []QuotaGroup{{DisplayName: "Gemini", Buckets: []QuotaBucket{{Window: "5h", RemainingFraction: 1}}}}, false},
-		{"a full Claude group is irrelevant", claude, false},
-		{"no quota data", nil, false},
-	} {
-		if got := needsGeminiWeeklyWarmup(&Record{Quotas: c.q}); got != c.want {
-			t.Errorf("%s: got %v want %v", c.name, got, c.want)
-		}
-	}
-}
-
-func TestWarmupAllFreshAccounts_OnlyTouchesUnusedEnabledAccounts(t *testing.T) {
-	fresh := warmAcc("wa-fresh@example.com")
-	fresh.Quotas = weeklyQuota(1)
-	broken := warmAcc("wa-broken@example.com")
-	broken.Quotas = weeklyQuota(1)
-	used := warmAcc("wa-used@example.com")
-	used.Quotas = weeklyQuota(0.2)
-	off := warmAcc("wa-off@example.com")
-	off.Quotas = weeklyQuota(1)
-	off.Disabled = true
-	seedAccounts(t, fresh, broken, used, off)
-
-	withStubbedHTTPClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		code, body := 200, `{"groups":[]}`
-		if strings.HasSuffix(r.URL.Path, ":generateContent") && strings.Contains(r.Header.Get("Authorization"), "bad") {
-			code, body = 403, `no`
-		}
-		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
-	}))
-	broken.AccessToken = "bad-token"
-
-	warmed, errs := globalAccountManager.WarmupAllFreshAccounts(context.Background())
-	if len(warmed) != 1 || warmed[0] != "wa-fresh@example.com" {
-		t.Fatalf("warmed = %v", warmed)
-	}
-	if len(errs) != 1 || errs["wa-broken@example.com"] == "" {
-		t.Fatalf("errs = %v", errs)
 	}
 }

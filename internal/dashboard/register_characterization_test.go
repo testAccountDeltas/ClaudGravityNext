@@ -129,7 +129,6 @@ func TestRegisterUIHandlers_RegistersEveryRouteBehindAuth(t *testing.T) {
 		{http.MethodPost, "/api/accounts/toggle?email=x@example.com&disabled=true"},
 		{http.MethodGet, "/api/refresh-quotas"},
 		{http.MethodGet, "/api/warmup?email=x@example.com"},
-		{http.MethodGet, "/api/warmup-all"},
 		{http.MethodGet, "/api/logs"},
 		{http.MethodGet, "/api/sessions"},
 		{http.MethodGet, "/api/session?id=abc"},

@@ -77,3 +77,16 @@ func TestWriteBlockedResponse_ProducesRefusalShapedMessageNotErrorBody(t *testin
 		t.Fatalf("expected stop_reason refusal, got %v", body["stop_reason"])
 	}
 }
+
+func TestRewriteArtifactURLsInResponse(t *testing.T) {
+	resp := map[string]interface{}{"content": []map[string]interface{}{
+		{"type": "thinking", "thinking": "https://claude.ai/code/artifact/11111111-1111-1111-1111-111111111111"},
+		{"type": "text", "text": "Open https://claude.ai/code/artifact/2bb7b152-e5f1-40ce-acc9-66838ca1da1c"},
+	}}
+	rewriteArtifactURLsInResponse(resp, "http://203.0.113.10:9101")
+	blocks := resp["content"].([]map[string]interface{})
+	want := "Open http://203.0.113.10:9101/code/artifact/2bb7b152-e5f1-40ce-acc9-66838ca1da1c"
+	if blocks[1]["text"] != want {
+		t.Fatalf("text = %q, want %q", blocks[1]["text"], want)
+	}
+}

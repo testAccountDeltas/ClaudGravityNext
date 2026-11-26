@@ -65,6 +65,7 @@ type Params struct {
 
 	StopSequences        []string
 	PrefillText          string
+	ArtifactViewerURL    string
 	SyntheticReasonTools map[string]bool
 	ReverseToolNameMap   map[string]string
 

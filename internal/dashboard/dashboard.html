@@ -929,9 +929,6 @@ table.clean-table tr:hover td {
     <button onclick="triggerRefreshQuotas()" class="btn btn-sm btn-ghost" title="Опросить актуальные квоты в Google CloudCode">
       🔄 Опросить квоты
     </button>
-    <button onclick="warmupAllFresh(this)" class="btn btn-sm btn-ghost" title="Прогреть аккаунты с 100% недельной квотой">
-      🔥 Прогреть 100%
-    </button>
     <a href="/oauth/paste" target="_blank" class="btn btn-sm btn-primary" title="Вход через Google с вставкой адреса возврата (для удалённого сервера)">
       ➕ Добавить Google аккаунт
     </a>
@@ -951,6 +948,10 @@ table.clean-table tr:hover td {
   <button class="nav-item" onclick="switchTab('keysView', this)">
     🔑 API Ключи & Ротация
     <span id="tabCountKeys" class="nav-count">0</span>
+  </button>
+  <button class="nav-item" onclick="switchTab('artifactsView', this); fetchArtifacts();">
+    🧩 Артефакты
+    <span id="tabCountArtifacts" class="nav-count">0</span>
   </button>
 </nav>
 
@@ -1134,6 +1135,35 @@ table.clean-table tr:hover td {
     </div>
   </div>
 
+  <!-- ======================================================================
+       VIEW 4: ARTIFACTS
+       ====================================================================== -->
+  <div id="artifactsView" class="view-pane">
+    <div class="main-stream-panel" style="flex:1;">
+      <div class="stream-toolbar">
+        <div style="font-size:12px;font-weight:600;color:var(--text-bright);">Сохранённые артефакты Claude Code</div>
+        <button onclick="fetchArtifacts()" class="btn btn-sm btn-ghost">🔄 Обновить</button>
+      </div>
+      <div class="table-container">
+        <table class="clean-table">
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>Slug / Локальный URL</th>
+              <th style="width:75px;">Версия</th>
+              <th style="width:95px;">Размер</th>
+              <th style="width:160px;">Обновлён</th>
+              <th style="text-align:right;width:210px;">Управление</th>
+            </tr>
+          </thead>
+          <tbody id="artifactsTableBody">
+            <tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-dim);">Загрузка артефактов...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <!-- ==========================================================================
@@ -1183,6 +1213,8 @@ table.clean-table tr:hover td {
         <select id="keyModelSelect" class="form-control">
           <optgroup label="Google Gemini">
             <option value="gemini-2.5-flash" selected>gemini-2.5-flash (быстрая, огромная квота)</option>
+            <option value="gemini-4-hydrogen-tiered-xhigh">gemini-4-hydrogen-tiered-xhigh (флагман Opus / XHigh)</option>
+            <option value="gemini-4-hydrogen-high">gemini-4-hydrogen-high (высокие рассуждения)</option>
             <option value="gemini-3.8-flash-tiered">gemini-3.8-flash-tiered (автоматический тиринг)</option>
             <option value="gemini-2.5-flash-thinking">gemini-2.5-flash-thinking (рассуждения)</option>
             <option value="gemini-2.5-pro">gemini-2.5-pro (глубокие рассуждения)</option>
@@ -2152,25 +2184,50 @@ function triggerRefreshQuotas() {
     .then(() => alert('🔄 Запущен опрос квот. Данные обновятся по WebSocket.'));
 }
 
-function warmupAllFresh(btn) {
-  const origText = btn.innerText;
-  btn.innerText = '⏳ Прогрев...';
-  btn.disabled = true;
-
-  fetch('/api/warmup-all')
+function fetchArtifacts() {
+  fetch('/api/dashboard/artifacts')
     .then(r => r.json())
     .then(data => {
-      if (data.count === 0) {
-        alert('Нет аккаунтов с 100% лимитом — прогревать нечего.');
-      } else {
-        alert(`✓ Прогрето аккаунтов: ${data.count}\n${data.warmed.join('\n')}`);
+      const list = (data && data.artifacts) ? data.artifacts : [];
+      document.getElementById('tabCountArtifacts').innerText = list.length;
+      const tbody = document.getElementById('artifactsTableBody');
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-dim);">Сохранённых артефактов пока нет.</td></tr>';
+        return;
       }
+      let html = '';
+      for (const a of list) {
+        const viewPath = '/code/artifact/' + encodeURIComponent(a.slug);
+        const fullUrl = location.origin + viewPath;
+        const sizeKB = ((a.size_bytes || 0) / 1024).toFixed(1) + ' KB';
+        const ts = a.updated_at ? new Date(a.updated_at).toLocaleString() : '-';
+        const title = a.title || a.slug;
+        const desc = a.description ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px;">${escapeHtml(a.description)}</div>` : '';
+        html += `
+          <tr>
+            <td><div style="font-weight:600;color:var(--text-bright);">${escapeHtml(title)}</div>${desc}</td>
+            <td class="mono-val"><a href="${viewPath}" target="_blank" style="color:var(--accent-blue,#58a6ff);text-decoration:none;">${escapeHtml(a.slug)}</a></td>
+            <td class="mono-val">v${a.version || 1}</td>
+            <td class="mono-val">${sizeKB}</td>
+            <td style="font-size:11px;color:var(--text-dim);">${escapeHtml(ts)}</td>
+            <td style="text-align:right;white-space:nowrap;">
+              <a href="${viewPath}" target="_blank" class="btn btn-sm btn-primary" style="text-decoration:none;">🔗 Открыть</a>
+              <button onclick="navigator.clipboard && navigator.clipboard.writeText('${escapeHtml(fullUrl)}')" class="btn btn-sm btn-ghost" title="Скопировать ссылку">📋</button>
+              <button onclick="deleteArtifact('${escapeHtml(a.slug)}')" class="btn btn-sm btn-danger">Удалить</button>
+            </td>
+          </tr>
+        `;
+      }
+      tbody.innerHTML = html;
     })
-    .catch(err => alert('Ошибка при прогреве: ' + err))
-    .finally(() => {
-      btn.innerText = origText;
-      btn.disabled = false;
-    });
+    .catch(err => console.error('Error fetching artifacts:', err));
+}
+
+function deleteArtifact(slug) {
+  if (!confirm('Удалить артефакт ' + slug + '?')) return;
+  fetch('/api/dashboard/artifacts/' + encodeURIComponent(slug), { method: 'DELETE' })
+    .then(() => fetchArtifacts())
+    .catch(err => alert('Ошибка удаления артефакта: ' + err));
 }
 
 function renderStats(stats) {
@@ -2184,6 +2241,7 @@ function renderStats(stats) {
 
 connectWS();
 fetchAPIKeys();
+fetchArtifacts();
 // Auto-refresh quotas every 2 minutes while dashboard is open in browser
 setInterval(() => {
   fetch('/api/refresh-quotas').catch(() => {});

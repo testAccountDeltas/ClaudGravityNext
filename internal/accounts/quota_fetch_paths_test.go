@@ -131,7 +131,7 @@ func TestFetchQuota_AllHostsFailing(t *testing.T) {
 
 func TestFetchQuota_MalformedBodyKeepsThePreviousSnapshot(t *testing.T) {
 	a := fqAcc("fq-bad@example.com", fallbackProjectID)
-	a.Quotas = weeklyQuota(0.5)
+	a.Quotas = []QuotaGroup{{DisplayName: "Gemini Models", Buckets: []QuotaBucket{{Window: "weekly", RemainingFraction: 0.5}}}}
 	seedAccounts(t, a)
 	quotaServer(t, func(int, quotaCall) (int, string, error) { return 200, `<html>`, nil })
 	if err := globalAccountManager.FetchQuota(a.Email); err == nil || !strings.Contains(err.Error(), "not valid JSON") {

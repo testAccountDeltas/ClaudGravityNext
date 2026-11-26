@@ -173,7 +173,7 @@ func handleFeedback(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleEval(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, r, `{"status":200,"features":{}}`)
+	writeJSON(w, r, `{"status":200,"features":{"tengu_slate_lantern":{"defaultValue":true},"tengu_slate_lantern_ember":{"defaultValue":true},"tengu_onyx_sluice":{"defaultValue":true},"tengu_teal_corbel":{"defaultValue":true},"tengu_sorrel_trellis":{"defaultValue":true}}}`)
 }
 
 func handleSessions(w http.ResponseWriter, r *http.Request) {

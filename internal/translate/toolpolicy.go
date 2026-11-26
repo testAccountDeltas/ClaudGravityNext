@@ -15,8 +15,9 @@ import (
 	"claudgravity/internal/toolschema"
 )
 
-func isGemini3(modelName string) bool {
-	return strings.Contains(strings.ToLower(modelName), "gemini-3")
+func isGemini3OrNewer(modelName string) bool {
+	m := strings.ToLower(modelName)
+	return strings.Contains(m, "gemini-3") || strings.Contains(m, "gemini-4")
 }
 
 // isServerSearchTool reports whether t is a web-search tool that Gemini
